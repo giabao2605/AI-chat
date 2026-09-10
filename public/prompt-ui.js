@@ -10,6 +10,9 @@ const saveBtn = $('savePromptBtn');
 const resetBtn = $('resetPromptBtn');
 const status = $('promptSaveStatus');
 const startBtn = $('startBtn');
+const autoStartKey = 'ai-chat-auto-start';
+const resumeAutoStart = localStorage.getItem(autoStartKey) === '1';
+if (resumeAutoStart) localStorage.setItem(autoStartKey, '0');
 
 let defaults = createPromptSettings({ sharedPrompt: '', personaA: '', personaB: '' }, null);
 let saved = null;
@@ -93,6 +96,16 @@ async function init() {
   // Capture runs before app.js' normal click listener. The exact text visible in the
   // fields is therefore persisted immediately before app.js builds /api/start payload.
   startBtn.addEventListener('click', () => save({ announce: false }), true);
+
+  if (resumeAutoStart) {
+    const autoStart = $('autoStart');
+    const topicMode = $('topicMode');
+    autoStart.checked = true;
+    localStorage.setItem(autoStartKey, '1');
+    topicMode.value = 'auto';
+    topicMode.dispatchEvent(new Event('change'));
+    if (!startBtn.disabled) startBtn.click();
+  }
 }
 
 init();
