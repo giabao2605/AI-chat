@@ -18,9 +18,13 @@ export function buildMessagesForAgent({ agentId, agentName, topic, history, shar
     { role: 'system', content: system },
     { role: 'user', content: `Chủ đề của phòng trò chuyện: ${topic}\n\nBắt đầu hoặc tiếp tục cuộc trò chuyện dựa trên transcript bên dưới.` },
   ];
+
   for (const item of history) {
-    if (item.speaker === agentId) messages.push({ role: 'assistant', content: item.text });
-    else messages.push({ role: 'user', content: `${item.name}: ${item.text}` });
+    if (item.speaker === agentId) {
+      messages.push({ role: 'assistant', content: item.text });
+    } else {
+      messages.push({ role: 'user', content: `${item.name}: ${item.text}` });
+    }
   }
   return messages;
 }
@@ -58,21 +62,35 @@ export class ConversationRoom extends EventEmitter {
   }
 
   snapshot() {
-    return { runId: this.runId, status: this.status, topic: this.topic, turn: this.turn, maxTurns: this.maxTurns, currentSpeaker: this.currentSpeaker, history: this.history, stats: this.stats };
+    return {
+      runId: this.runId,
+      status: this.status,
+      topic: this.topic,
+      turn: this.turn,
+      maxTurns: this.maxTurns,
+      currentSpeaker: this.currentSpeaker,
+      history: this.history,
+      stats: this.stats,
+    };
   }
 
-  emitState() { this.emit('state', this.snapshot()); }
+  emitState() {
+    this.emit('state', this.snapshot());
+  }
 
   validateAgents() {
     for (const id of ['a', 'b']) {
       const agent = this.agentConfigs[id];
-      if (!agent?.apiKey || !agent?.model || !agent?.baseUrl) throw new Error(`${agent?.name || `Agent ${id.toUpperCase()}`} chưa được cấu hình đủ API key, model và base URL.`);
+      if (!agent?.apiKey || !agent?.model || !agent?.baseUrl) {
+        throw new Error(`${agent?.name || `Agent ${id.toUpperCase()}`} chưa được cấu hình đủ API key, model và base URL.`);
+      }
     }
   }
 
   async start(input = {}) {
     if (['running', 'paused', 'pausing'].includes(this.status)) throw new Error('Phòng đang chạy. Hãy dừng hoặc reset trước khi bắt đầu phiên mới.');
     this.validateAgents();
+
     this.runId = randomUUID();
     this.status = 'starting';
     this.turn = 0;
@@ -81,6 +99,7 @@ export class ConversationRoom extends EventEmitter {
     this.currentSpeaker = null;
     this.maxTurns = Math.floor(clamp(input.maxTurns, 1, 100000, 20));
     if (this.hardTurnLimit > 0) this.maxTurns = Math.min(this.maxTurns, this.hardTurnLimit);
+
     this.settings = {
       topicMode: input.topicMode === 'auto' ? 'auto' : 'manual',
       sharedPrompt: safeText(input.sharedPrompt, 30000) || DEFAULT_SHARED_PROMPT,
@@ -90,21 +109,33 @@ export class ConversationRoom extends EventEmitter {
       maxOutputTokens: Math.floor(clamp(input.maxOutputTokens, 64, 16000, 1200)),
       startSpeaker: ['a', 'b', 'random'].includes(input.startSpeaker) ? input.startSpeaker : 'random',
     };
-    this.providers = { a: this.providerFactory(this.agentConfigs.a), b: this.providerFactory(this.agentConfigs.b) };
+
+    this.providers = {
+      a: this.providerFactory(this.agentConfigs.a),
+      b: this.providerFactory(this.agentConfigs.b),
+    };
+
     this.emitState();
-    if (this.settings.topicMode === 'auto') this.topic = await this.chooseTopic();
-    else {
-      this.topic = safeText(input.topic, 5000);
-      if (!this.topic) {
-        this.status = 'idle';
-        this.emitState();
-        throw new Error('Hãy nhập chủ đề hoặc chọn chế độ AI tự chọn chủ đề.');
+
+    try {
+      if (this.settings.topicMode === 'auto') {
+        this.topic = await this.chooseTopic();
+      } else {
+        this.topic = safeText(input.topic, 5000);
+        if (!this.topic) throw new Error('Hãy nhập chủ đề hoặc chọn chế độ AI tự chọn chủ đề.');
       }
+    } catch (error) {
+      this.status = error?.name === 'AbortError' ? 'stopped' : 'error';
+      this.currentSpeaker = null;
+      this.emitState();
+      throw error;
     }
+
     this.status = 'running';
     this.emit('topic', { topic: this.topic });
     this.emitState();
-    void this.runLoop();
+    const activeRunId = this.runId;
+    void this.runLoop(activeRunId);
     return this.snapshot();
   }
 
@@ -112,11 +143,20 @@ export class ConversationRoom extends EventEmitter {
     this.abortController = new AbortController();
     const agent = this.agentConfigs.a;
     const messages = [
-      { role: 'system', content: 'Bạn đang chuẩn bị một cuộc trò chuyện tự do với một AI khác. Hãy chọn một chủ đề đủ cụ thể để hai bên có thể thảo luận nhiều lượt. Chỉ trả về tên/chủ đề trong tối đa 2 câu, không giải thích thêm.' },
+      {
+        role: 'system',
+        content: 'Bạn đang chuẩn bị một cuộc trò chuyện tự do với một AI khác. Hãy chọn một chủ đề đủ cụ thể để hai bên có thể thảo luận nhiều lượt. Chỉ trả về tên/chủ đề trong tối đa 2 câu, không giải thích thêm.',
+      },
       { role: 'user', content: 'Hãy tự chọn chủ đề mà bạn muốn nói chuyện với AI còn lại.' },
     ];
     this.emit('meta', { text: `${agent.name} đang tự chọn chủ đề...` });
-    const result = await this.providers.a.streamChat({ messages, temperature: 1, maxOutputTokens: 160, signal: this.abortController.signal, onDelta: () => {} });
+    const result = await this.providers.a.streamChat({
+      messages,
+      temperature: 1,
+      maxOutputTokens: 160,
+      signal: this.abortController.signal,
+      onDelta: () => {},
+    });
     this.addUsage('a', result.usage, false);
     return result.text || 'AI nên hợp tác với con người như thế nào trong tương lai?';
   }
@@ -126,25 +166,26 @@ export class ConversationRoom extends EventEmitter {
     return this.settings.startSpeaker;
   }
 
-  async runLoop() {
+  async runLoop(activeRunId = this.runId) {
     let speaker = this.firstSpeaker();
     try {
-      while (this.turn < this.maxTurns && !['stopped', 'idle', 'error'].includes(this.status)) {
+      while (activeRunId === this.runId && this.turn < this.maxTurns && !['stopped', 'idle', 'error'].includes(this.status)) {
         await this.waitUntilRunnable();
         if (['stopped', 'idle', 'error'].includes(this.status)) break;
-        await this.runAgentTurn(speaker);
+        await this.runAgentTurn(speaker, activeRunId);
         if (['stopped', 'idle', 'error'].includes(this.status)) break;
         this.turn += 1;
         speaker = speaker === 'a' ? 'b' : 'a';
         this.emitState();
       }
-      if (this.status === 'running' && this.turn >= this.maxTurns) {
+      if (activeRunId === this.runId && this.status === 'running' && this.turn >= this.maxTurns) {
         this.status = 'completed';
         this.currentSpeaker = null;
         this.emit('meta', { text: `Đã đạt giới hạn ${this.maxTurns} lượt.` });
         this.emitState();
       }
     } catch (error) {
+      if (activeRunId !== this.runId) return;
       if (error?.name === 'AbortError' && ['stopped', 'idle'].includes(this.status)) return;
       this.status = 'error';
       this.currentSpeaker = null;
@@ -164,17 +205,52 @@ export class ConversationRoom extends EventEmitter {
     }
   }
 
-  async runAgentTurn(agentId) {
+  async runAgentTurn(agentId, activeRunId = this.runId) {
     const agent = this.agentConfigs[agentId];
     const messageId = randomUUID();
     this.currentSpeaker = agentId;
     this.abortController = new AbortController();
-    const messages = buildMessagesForAgent({ agentId, agentName: agent.name, topic: this.topic, history: this.history, sharedPrompt: this.settings.sharedPrompt, personaPrompt: agentId === 'a' ? this.settings.personaA : this.settings.personaB });
+    const messages = buildMessagesForAgent({
+      agentId,
+      agentName: agent.name,
+      topic: this.topic,
+      history: this.history,
+      sharedPrompt: this.settings.sharedPrompt,
+      personaPrompt: agentId === 'a' ? this.settings.personaA : this.settings.personaB,
+    });
+
     this.emit('message:start', { id: messageId, speaker: agentId, name: agent.name });
-    const result = await this.providers[agentId].streamChat({ messages, temperature: this.settings.temperature, maxOutputTokens: this.settings.maxOutputTokens, signal: this.abortController.signal, onDelta: (delta) => this.emit('message:delta', { id: messageId, speaker: agentId, delta }) });
+    let result;
+    try {
+      result = await this.providers[agentId].streamChat({
+        messages,
+        temperature: this.settings.temperature,
+        maxOutputTokens: this.settings.maxOutputTokens,
+        signal: this.abortController.signal,
+        onDelta: (delta) => {
+          if (activeRunId === this.runId) this.emit('message:delta', { id: messageId, speaker: agentId, delta });
+        },
+      });
+    } catch (error) {
+      if (error?.name === 'AbortError' || activeRunId !== this.runId) {
+        this.emit('message:cancelled', { id: messageId, speaker: agentId });
+      } else {
+        this.emit('message:failed', { id: messageId, speaker: agentId, message: error?.message || String(error) });
+      }
+      throw error;
+    }
+
+    if (activeRunId !== this.runId) return;
     const text = safeText(result.text, 100000);
     if (!text) throw new Error(`${agent.name} trả về nội dung rỗng.`);
-    const entry = { id: messageId, speaker: agentId, name: agent.name, text, createdAt: new Date().toISOString(), usage: result.usage };
+    const entry = {
+      id: messageId,
+      speaker: agentId,
+      name: agent.name,
+      text,
+      createdAt: new Date().toISOString(),
+      usage: result.usage,
+    };
     this.history.push(entry);
     this.addUsage(agentId, result.usage, true);
     this.currentSpeaker = null;
@@ -195,7 +271,14 @@ export class ConversationRoom extends EventEmitter {
     const cleaned = safeText(text, 20000);
     if (!cleaned) throw new Error('Tin nhắn trống.');
     if (!this.topic) throw new Error('Chưa có phiên trò chuyện để tham gia.');
-    const entry = { id: randomUUID(), speaker: 'user', name: 'Bạn', text: cleaned, createdAt: new Date().toISOString(), usage: null };
+    const entry = {
+      id: randomUUID(),
+      speaker: 'user',
+      name: 'Bạn',
+      text: cleaned,
+      createdAt: new Date().toISOString(),
+      usage: null,
+    };
     this.history.push(entry);
     this.emit('message:done', entry);
     this.emitState();

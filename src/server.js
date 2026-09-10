@@ -8,18 +8,37 @@ import { ConversationRoom } from './orchestrator.js';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = normalize(join(__dirname, '..', 'public'));
 const serverConfig = getServerConfig();
-const room = new ConversationRoom({ agentA: getAgentConfig('a'), agentB: getAgentConfig('b'), hardTurnLimit: serverConfig.hardTurnLimit });
-const clients = new Set();
-const eventNames = ['state', 'topic', 'meta', 'message:start', 'message:delta', 'message:done', 'stats', 'error'];
-for (const eventName of eventNames) room.on(eventName, (payload) => broadcast(eventName, payload));
+const room = new ConversationRoom({
+  agentA: getAgentConfig('a'),
+  agentB: getAgentConfig('b'),
+  hardTurnLimit: serverConfig.hardTurnLimit,
+});
 
-function sendSse(res, event, payload) { res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`); }
-function broadcast(event, payload) { for (const client of clients) sendSse(client, event, payload); }
+const clients = new Set();
+const eventNames = ['state', 'topic', 'meta', 'message:start', 'message:delta', 'message:done', 'message:cancelled', 'message:failed', 'stats', 'room:error'];
+for (const eventName of eventNames) {
+  room.on(eventName, (payload) => broadcast(eventName, payload));
+}
+room.on('error', (payload) => broadcast('room:error', payload));
+
+function sendSse(res, event, payload) {
+  res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+}
+
+function broadcast(event, payload) {
+  for (const client of clients) sendSse(client, event, payload);
+}
+
 function json(res, status, payload) {
   const body = JSON.stringify(payload);
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(body), 'cache-control': 'no-store' });
+  res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': Buffer.byteLength(body),
+    'cache-control': 'no-store',
+  });
   res.end(body);
 }
+
 async function readJson(req) {
   let body = '';
   for await (const chunk of req) {
@@ -27,60 +46,111 @@ async function readJson(req) {
     if (body.length > 512_000) throw new Error('Request body quá lớn.');
   }
   if (!body) return {};
-  try { return JSON.parse(body); } catch { throw new Error('JSON không hợp lệ.'); }
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new Error('JSON không hợp lệ.');
+  }
 }
 
 async function handleApi(req, res, pathname) {
   if (req.method === 'GET' && pathname === '/api/health') return json(res, 200, { ok: true, status: room.status });
   if (req.method === 'GET' && pathname === '/api/config') return json(res, 200, getPublicConfig());
   if (req.method === 'GET' && pathname === '/api/state') return json(res, 200, room.snapshot());
+
   if (req.method === 'GET' && pathname === '/api/events') {
-    res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' });
+    res.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache, no-transform',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    });
     res.write(': connected\n\n');
     clients.add(res);
     sendSse(res, 'state', room.snapshot());
     req.on('close', () => clients.delete(res));
     return;
   }
+
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed.' });
   const body = await readJson(req);
-  if (pathname === '/api/start') return json(res, 200, await room.start(body));
-  if (pathname === '/api/pause') { room.pause(); return json(res, 200, room.snapshot()); }
-  if (pathname === '/api/resume') { room.resume(); return json(res, 200, room.snapshot()); }
-  if (pathname === '/api/stop') { room.stop(); return json(res, 200, room.snapshot()); }
-  if (pathname === '/api/reset') { room.reset(); return json(res, 200, room.snapshot()); }
-  if (pathname === '/api/message') return json(res, 200, room.addUserMessage(body.text));
+
+  if (pathname === '/api/start') {
+    const state = await room.start(body);
+    return json(res, 200, state);
+  }
+  if (pathname === '/api/pause') {
+    room.pause();
+    return json(res, 200, room.snapshot());
+  }
+  if (pathname === '/api/resume') {
+    room.resume();
+    return json(res, 200, room.snapshot());
+  }
+  if (pathname === '/api/stop') {
+    room.stop();
+    return json(res, 200, room.snapshot());
+  }
+  if (pathname === '/api/reset') {
+    room.reset();
+    return json(res, 200, room.snapshot());
+  }
+  if (pathname === '/api/message') {
+    const entry = room.addUserMessage(body.text);
+    return json(res, 200, entry);
+  }
+
   return json(res, 404, { error: 'API route not found.' });
 }
 
-const mimeTypes = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml' };
+const mimeTypes = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+};
+
 async function serveStatic(res, pathname) {
   const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
   const target = normalize(join(publicDir, relative));
   if (!target.startsWith(publicDir)) return json(res, 403, { error: 'Forbidden.' });
   try {
     const data = await readFile(target);
-    res.writeHead(200, { 'content-type': mimeTypes[extname(target)] || 'application/octet-stream', 'cache-control': 'no-cache' });
+    res.writeHead(200, {
+      'content-type': mimeTypes[extname(target)] || 'application/octet-stream',
+      'cache-control': 'no-cache',
+    });
     res.end(data);
   } catch {
     try {
       const data = await readFile(join(publicDir, 'index.html'));
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
       res.end(data);
-    } catch { json(res, 404, { error: 'Not found.' }); }
+    } catch {
+      json(res, 404, { error: 'Not found.' });
+    }
   }
 }
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   try {
-    if (url.pathname.startsWith('/api/')) await handleApi(req, res, url.pathname);
-    else await serveStatic(res, url.pathname);
-  } catch (error) { json(res, 400, { error: error?.message || String(error) }); }
+    if (url.pathname.startsWith('/api/')) {
+      await handleApi(req, res, url.pathname);
+    } else {
+      await serveStatic(res, url.pathname);
+    }
+  } catch (error) {
+    json(res, 400, { error: error?.message || String(error) });
+  }
 });
 
-const heartbeat = setInterval(() => { for (const client of clients) client.write(': ping\n\n'); }, 20_000);
+const heartbeat = setInterval(() => {
+  for (const client of clients) client.write(': ping\n\n');
+}, 20_000);
 heartbeat.unref();
+
 server.listen(serverConfig.port, serverConfig.host, () => {
   console.log(`AI Chat Lab running at http://${serverConfig.host}:${serverConfig.port}`);
   console.log('API keys stay server-side. Configure them in .env; never commit that file.');
