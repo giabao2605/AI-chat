@@ -245,9 +245,17 @@ function connectEvents() {
 
 async function startConversation() {
   try {
+    const topicMode = els.topicMode.value;
+    const topic = els.topic.value.trim();
+    if (topicMode === 'manual' && !topic) {
+      toast('Hãy nhập chủ đề trước khi bắt đầu phiên.');
+      els.topic.focus();
+      return;
+    }
+
     const payload = {
-      topicMode: els.topicMode.value,
-      topic: els.topic.value,
+      topicMode,
+      topic,
       maxTurns: Number(els.maxTurns.value),
       startSpeaker: els.startSpeaker.value,
       temperature: Number(els.temperature.value),
