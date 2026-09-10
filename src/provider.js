@@ -1,0 +1,137 @@
+function chatEndpoint(baseUrl) {
+  const normalized = String(baseUrl || '').trim().replace(/\/+$/, '');
+  if (!normalized) throw new Error('Provider base URL is missing.');
+  if (/\/chat\/completions$/i.test(normalized)) return normalized;
+  return `${normalized}/chat/completions`;
+}
+
+export function estimateTokensFromText(text) {
+  const chars = String(text || '').length;
+  return chars === 0 ? 0 : Math.max(1, Math.ceil(chars / 4));
+}
+
+export function estimateUsage(messages, outputText) {
+  const inputText = messages.map((message) => `${message.role}:${message.content}`).join('\n');
+  const inputTokens = estimateTokensFromText(inputText);
+  const outputTokens = estimateTokensFromText(outputText);
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+    exact: false,
+  };
+}
+
+export function normalizeUsage(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const inputTokens = Number(raw.prompt_tokens ?? raw.input_tokens ?? 0);
+  const outputTokens = Number(raw.completion_tokens ?? raw.output_tokens ?? 0);
+  const totalTokens = Number(raw.total_tokens ?? inputTokens + outputTokens);
+  if (![inputTokens, outputTokens, totalTokens].some((value) => Number.isFinite(value) && value > 0)) return null;
+  return {
+    inputTokens: Number.isFinite(inputTokens) ? inputTokens : 0,
+    outputTokens: Number.isFinite(outputTokens) ? outputTokens : 0,
+    totalTokens: Number.isFinite(totalTokens) ? totalTokens : inputTokens + outputTokens,
+    exact: true,
+  };
+}
+
+function extractDelta(payload) {
+  const content = payload?.choices?.[0]?.delta?.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map((part) => typeof part === 'string' ? part : (part?.text || '')).join('');
+  }
+  return '';
+}
+
+async function requestStream({ endpoint, apiKey, body, signal, includeUsage }) {
+  const payload = includeUsage ? { ...body, stream_options: { include_usage: true } } : body;
+  return fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export class OpenAICompatibleProvider {
+  constructor({ baseUrl, apiKey, model }) {
+    this.endpoint = chatEndpoint(baseUrl);
+    this.apiKey = apiKey;
+    this.model = model;
+  }
+
+  async streamChat({ messages, temperature = 0.8, maxOutputTokens = 1200, signal, onDelta = () => {} }) {
+    const body = {
+      model: this.model,
+      messages,
+      stream: true,
+      temperature,
+      max_tokens: maxOutputTokens,
+    };
+
+    let response = await requestStream({
+      endpoint: this.endpoint,
+      apiKey: this.apiKey,
+      body,
+      signal,
+      includeUsage: true,
+    });
+
+    if (!response.ok && [400, 404, 422].includes(response.status)) {
+      response = await requestStream({
+        endpoint: this.endpoint,
+        apiKey: this.apiKey,
+        body,
+        signal,
+        includeUsage: false,
+      });
+    }
+
+    if (!response.ok) {
+      const errorText = (await response.text()).slice(0, 2000);
+      throw new Error(`Provider returned HTTP ${response.status}: ${errorText || response.statusText}`);
+    }
+
+    if (!response.body) throw new Error('Provider returned no response body.');
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let fullText = '';
+    let usage = null;
+
+    const consumeLine = (line) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) return;
+      const data = trimmed.slice(5).trim();
+      if (!data || data === '[DONE]') return;
+      let payload;
+      try { payload = JSON.parse(data); } catch { return; }
+      const delta = extractDelta(payload);
+      if (delta) {
+        fullText += delta;
+        onDelta(delta);
+      }
+      const normalized = normalizeUsage(payload.usage);
+      if (normalized) usage = normalized;
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || '';
+      for (const line of lines) consumeLine(line);
+    }
+    buffer += decoder.decode();
+    if (buffer) consumeLine(buffer);
+
+    return { text: fullText.trim(), usage: usage || estimateUsage(messages, fullText) };
+  }
+}
