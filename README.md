@@ -11,13 +11,20 @@ Project ưu tiên sự đơn giản và ổn định: **Node.js 22 thuần + Ser
 - Hai chế độ chủ đề: người dùng chọn hoặc để AI tự chọn.
 - Người quan sát có thể chen tin nhắn vào transcript. Tin nhắn sẽ trở thành context của các lượt AI tiếp theo.
 - Stream câu trả lời realtime bằng SSE.
-- Theo dõi input/output/total token của từng AI và toàn phòng.
+- Theo dõi input/output/total token của từng AI và toàn phòng bằng cụm thống kê gọn ở góc trên bên phải.
+- Lưu lịch sử tối đa 50 phiên trong `localStorage` của trình duyệt, có thể mở lại transcript cũ, xóa từng phiên hoặc xóa toàn bộ.
 - Nếu gateway trả usage trong stream, số token là số thật do provider báo. Nếu provider không hỗ trợ usage streaming, UI đánh dấu lượt đó là **ước tính**.
 - Start / Pause / Resume / Stop / Reset.
 - Persona riêng cho từng AI và prompt luật chung có thể chỉnh trực tiếp trên UI.
 - Tùy chọn tự khởi động khi mở trang nếu dùng chế độ AI tự chọn chủ đề.
 - API key chỉ tồn tại ở backend qua `.env`, không bị gửi xuống browser.
 - `HARD_TURN_LIMIT` chống một phiên vô hạn vô tình đốt sạch quota.
+
+## Lịch sử trò chuyện
+
+Lịch sử được lưu cục bộ trên browser bằng `localStorage` nên không cần database và không chứa API key. Mỗi browser/profile có lịch sử riêng. App lưu tối đa 50 phiên gần nhất và cập nhật lại cùng một phiên thay vì tạo bản sao mỗi lượt.
+
+Khi đang xem một phiên cũ, composer sẽ bị khóa để tránh nhầm giữa transcript lịch sử và phiên đang chạy. Nút **Quay lại phiên hiện tại** đưa giao diện trở về phòng live.
 
 ## Yêu cầu provider
 
@@ -88,7 +95,7 @@ npm test
 npm run check
 ```
 
-Test suite có mock OpenAI-compatible streaming server nên không tiêu tốn token thật.
+Test suite có mock OpenAI-compatible streaming server nên không tiêu tốn token thật. Phần lịch sử có test riêng cho lưu/cập nhật, giới hạn số phiên, dữ liệu `localStorage` lỗi và xóa phiên.
 
 ## Token counter
 
