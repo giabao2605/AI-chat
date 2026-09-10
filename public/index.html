@@ -69,7 +69,17 @@
         <div class="two-cols"><label class="field"><span>Số lượt</span><input id="maxTurns" type="number" min="1" max="200" value="20" /></label><label class="field"><span>AI mở lời</span><select id="startSpeaker"><option value="random">Ngẫu nhiên</option><option value="a">Agent A</option><option value="b">Agent B</option></select></label></div>
         <div class="two-cols"><label class="field"><span>Temperature</span><input id="temperature" type="number" min="0" max="2" step="0.1" value="0.8" /></label><label class="field"><span>Max token/lượt</span><input id="maxOutputTokens" type="number" min="64" max="16000" value="1200" /></label></div>
         <label class="toggle-row"><input id="autoStart" type="checkbox" /><span><b>Tự chạy khi mở trang</b><small>Chỉ hoạt động khi chọn “AI tự chọn chủ đề”.</small></span></label>
-        <details class="advanced"><summary>Prompt & tính cách</summary><label class="field"><span>Luật chung</span><textarea id="sharedPrompt" rows="9"></textarea></label><label class="field"><span><i class="agent-dot a"></i> Persona Agent A</span><textarea id="personaA" rows="4" placeholder="Ví dụ: hoài nghi, thích phản biện và yêu cầu bằng chứng."></textarea></label><label class="field"><span><i class="agent-dot b"></i> Persona Agent B</span><textarea id="personaB" rows="4" placeholder="Ví dụ: thích khám phá giả thuyết và đề xuất hướng mới."></textarea></label></details>
+        <details id="promptPanel" class="advanced">
+          <summary>Prompt & tính cách</summary>
+          <label class="field"><span>Luật chung</span><textarea id="sharedPrompt" rows="9"></textarea></label>
+          <label class="field"><span><i class="agent-dot a"></i> Persona Agent A</span><textarea id="personaA" rows="4" placeholder="Ví dụ: hoài nghi, thích phản biện và yêu cầu bằng chứng."></textarea></label>
+          <label class="field"><span><i class="agent-dot b"></i> Persona Agent B</span><textarea id="personaB" rows="4" placeholder="Ví dụ: thích khám phá giả thuyết và đề xuất hướng mới."></textarea></label>
+          <div class="two-cols">
+            <button id="savePromptBtn" class="button primary" type="button">Lưu prompt</button>
+            <button id="resetPromptBtn" class="button ghost" type="button">Khôi phục mặc định</button>
+          </div>
+          <p id="promptSaveStatus" class="footnote">Prompt đã lưu sẽ được dùng làm system prompt từ phiên tiếp theo.</p>
+        </details>
         <div id="configWarning" class="warning hidden"></div><button id="startBtn" class="button primary wide">Bắt đầu phiên</button><p class="footnote">API key chỉ nằm ở server qua <code>.env</code>, không được gửi xuống trình duyệt.</p>
       </aside>
     </main>
@@ -87,5 +97,6 @@
 
   <div id="toast" class="toast" role="status"></div>
   <script type="module" src="/app.js"></script>
+  <script type="module" src="/prompt-ui.js"></script>
 </body>
 </html>
