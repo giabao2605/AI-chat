@@ -10,20 +10,58 @@
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <div><div class="eyebrow">AI CONVERSATION LAB</div><h1>Hai AI, một căn phòng.</h1></div>
-      <div class="status-wrap"><span id="connectionDot" class="dot offline"></span><span id="connectionText">Đang kết nối</span><span id="roomStatus" class="status-pill">idle</span></div>
+      <div class="brand-block">
+        <div class="eyebrow">AI CONVERSATION LAB</div>
+        <h1>Hai AI, một căn phòng.</h1>
+      </div>
+
+      <div class="topbar-right">
+        <div class="compact-stats" aria-label="Thống kê token">
+          <div class="mini-stat agent-a-mini" title="Token Agent A">
+            <span id="agentAName">Agent A</span>
+            <strong id="agentATotal">0</strong>
+            <small><span id="agentAModel">-</span> · In <b id="agentAInput">0</b> / Out <b id="agentAOutput">0</b></small>
+            <i id="agentAEstimate"></i>
+          </div>
+          <div class="mini-stat agent-b-mini" title="Token Agent B">
+            <span id="agentBName">Agent B</span>
+            <strong id="agentBTotal">0</strong>
+            <small><span id="agentBModel">-</span> · In <b id="agentBInput">0</b> / Out <b id="agentBOutput">0</b></small>
+            <i id="agentBEstimate"></i>
+          </div>
+          <div class="mini-stat room-mini" title="Token toàn phòng">
+            <span>Toàn phòng</span>
+            <strong id="combinedTotal">0</strong>
+            <small><span id="turnCounter">0 / 20</span> lượt</small>
+          </div>
+        </div>
+        <div class="status-line">
+          <div class="status-wrap"><span id="connectionDot" class="dot offline"></span><span id="connectionText">Đang kết nối</span><span id="roomStatus" class="status-pill">idle</span></div>
+          <button id="historyBtn" class="button ghost compact-button" type="button">Lịch sử <span id="historyCount" class="history-count">0</span></button>
+        </div>
+      </div>
     </header>
-    <section class="stats-grid">
-      <article class="stat-card agent-a-card"><div class="stat-head"><span id="agentAName">Agent A</span><span id="agentAModel" class="model-label">-</span></div><strong id="agentATotal">0</strong><span>token tổng</span><div class="token-row"><span>Input <b id="agentAInput">0</b></span><span>Output <b id="agentAOutput">0</b></span></div><small id="agentAEstimate"></small></article>
-      <article class="stat-card agent-b-card"><div class="stat-head"><span id="agentBName">Agent B</span><span id="agentBModel" class="model-label">-</span></div><strong id="agentBTotal">0</strong><span>token tổng</span><div class="token-row"><span>Input <b id="agentBInput">0</b></span><span>Output <b id="agentBOutput">0</b></span></div><small id="agentBEstimate"></small></article>
-      <article class="stat-card room-card"><div class="stat-head"><span>Phiên hiện tại</span><span id="turnCounter" class="model-label">0 / 20</span></div><strong id="combinedTotal">0</strong><span>token cả phòng</span><div id="topicPreview" class="topic-preview">Chưa có chủ đề.</div></article>
-    </section>
+
     <main class="workspace">
       <section class="chat-panel">
-        <div class="chat-toolbar"><div><h2>Phòng trò chuyện</h2><p id="liveHint">Chưa bắt đầu phiên.</p></div><div class="toolbar-actions"><button id="pauseBtn" class="button ghost" disabled>Tạm dừng</button><button id="stopBtn" class="button danger" disabled>Dừng</button></div></div>
-        <div id="chat" class="chat" aria-live="polite"><div id="emptyState" class="empty-state"><div class="empty-orbit">A ↔ B</div><h3>Chưa có drama trí tuệ nhân tạo.</h3><p>Chọn chủ đề hoặc để AI tự chọn, rồi bắt đầu. Bạn có thể ngồi xem hoặc chen ngang bất cứ lúc nào.</p></div></div>
+        <div class="chat-toolbar">
+          <div>
+            <h2>Phòng trò chuyện</h2>
+            <p id="liveHint">Chưa bắt đầu phiên.</p>
+            <div id="topicPreview" class="topic-inline">Chưa có chủ đề.</div>
+          </div>
+          <div class="toolbar-actions"><button id="pauseBtn" class="button ghost" disabled>Tạm dừng</button><button id="stopBtn" class="button danger" disabled>Dừng</button></div>
+        </div>
+
+        <div id="historyViewBanner" class="history-view-banner hidden">
+          <div><span>Đang xem lịch sử</span><strong id="historyViewTopic"></strong></div>
+          <button id="returnLiveBtn" class="button ghost" type="button">Quay lại phiên hiện tại</button>
+        </div>
+
+        <div id="chat" class="chat" aria-live="polite"><div class="empty-state"><div class="empty-orbit">A ↔ B</div><h3>Chưa có drama trí tuệ nhân tạo.</h3><p>Chọn chủ đề hoặc để AI tự chọn, rồi bắt đầu. Bạn có thể ngồi xem hoặc chen ngang bất cứ lúc nào.</p></div></div>
         <form id="userForm" class="composer"><input id="userInput" type="text" maxlength="20000" placeholder="Chen vào cuộc trò chuyện..." autocomplete="off" disabled /><button id="sendBtn" class="button primary" type="submit" disabled>Gửi</button></form>
       </section>
+
       <aside class="control-panel">
         <div class="panel-title"><div><div class="eyebrow">CONTROL ROOM</div><h2>Thiết lập</h2></div><button id="resetBtn" class="icon-button" title="Reset phiên">↻</button></div>
         <label class="field"><span>Chế độ chủ đề</span><select id="topicMode"><option value="manual">Tôi chọn chủ đề</option><option value="auto">AI tự chọn chủ đề</option></select></label>
@@ -36,6 +74,17 @@
       </aside>
     </main>
   </div>
+
+  <div id="historyBackdrop" class="history-backdrop hidden"></div>
+  <aside id="historyDrawer" class="history-drawer" aria-hidden="true">
+    <div class="history-header">
+      <div><div class="eyebrow">LOCAL HISTORY</div><h2>Lịch sử trò chuyện</h2><p>Tối đa 50 phiên trên trình duyệt này.</p></div>
+      <button id="closeHistoryBtn" class="icon-button" type="button" title="Đóng">×</button>
+    </div>
+    <div class="history-actions"><button id="clearHistoryBtn" class="button danger" type="button">Xóa toàn bộ lịch sử</button></div>
+    <div id="historyList" class="history-list"></div>
+  </aside>
+
   <div id="toast" class="toast" role="status"></div>
   <script type="module" src="/app.js"></script>
 </body>
