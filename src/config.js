@@ -64,6 +64,27 @@ export function getWebSearchConfig() {
   };
 }
 
+export function getImageGenConfig() {
+  const apiKey = String(process.env.IMAGE_GEN_API_KEY || '').trim();
+  const model = String(process.env.IMAGE_GEN_MODEL || '').trim();
+  const baseUrl = cleanBaseUrl(process.env.IMAGE_GEN_BASE_URL || '');
+  const endpoint = String(process.env.IMAGE_GEN_ENDPOINT || '').trim();
+  const configured = Boolean(apiKey && model && (baseUrl || endpoint));
+  const enabled = boolFromEnv('IMAGE_GEN_ENABLED', configured) && configured;
+  return {
+    provider: 'openai-compatible',
+    enabled,
+    configured,
+    apiKey,
+    model,
+    baseUrl,
+    endpoint,
+    size: String(process.env.IMAGE_GEN_SIZE || '1024x1024').trim(),
+    timeoutMs: Math.max(5000, intFromEnv('IMAGE_GEN_TIMEOUT_MS', 120000)),
+    maxBytes: Math.max(1024 * 1024, intFromEnv('IMAGE_GEN_MAX_BYTES', 25 * 1024 * 1024)),
+  };
+}
+
 export function getServerConfig() {
   return {
     host: process.env.HOST || '127.0.0.1',
@@ -76,6 +97,7 @@ export function getPublicConfig() {
   const a = getAgentConfig('a');
   const b = getAgentConfig('b');
   const webSearch = getWebSearchConfig();
+  const imageGen = getImageGenConfig();
   return {
     agents: {
       a: { id: 'a', name: a.name, model: a.model, baseUrl: a.baseUrl, configured: Boolean(a.apiKey && a.model && a.baseUrl) },
@@ -86,6 +108,13 @@ export function getPublicConfig() {
       enabled: webSearch.enabled,
       configured: webSearch.configured,
       country: webSearch.country,
+    },
+    imageGen: {
+      provider: imageGen.provider,
+      enabled: imageGen.enabled,
+      configured: imageGen.configured,
+      model: imageGen.model,
+      size: imageGen.size,
     },
     defaults: {
       sharedPrompt: DEFAULT_SHARED_PROMPT,
