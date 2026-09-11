@@ -36,6 +36,23 @@ export function normalizeUsage(raw) {
   };
 }
 
+export function normalizeMessagesForProvider(messages = []) {
+  const systemParts = [];
+  const rest = [];
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') continue;
+    const role = String(message.role || '');
+    const content = String(message.content ?? '');
+    if (role === 'system') {
+      if (content.trim()) systemParts.push(content.trim());
+    } else {
+      rest.push({ ...message, role, content });
+    }
+  }
+  if (!systemParts.length) return rest;
+  return [{ role: 'system', content: systemParts.join('\n\n') }, ...rest];
+}
+
 function extractDelta(payload) {
   const content = payload?.choices?.[0]?.delta?.content;
   if (typeof content === 'string') return content;
@@ -66,9 +83,10 @@ export class OpenAICompatibleProvider {
   }
 
   async streamChat({ messages, temperature = 0.8, maxOutputTokens = 1200, signal, onDelta = () => {} }) {
+    const providerMessages = normalizeMessagesForProvider(messages);
     const body = {
       model: this.model,
-      messages,
+      messages: providerMessages,
       stream: true,
       temperature,
       max_tokens: maxOutputTokens,
@@ -132,6 +150,6 @@ export class OpenAICompatibleProvider {
     buffer += decoder.decode();
     if (buffer) consumeLine(buffer);
 
-    return { text: fullText.trim(), usage: usage || estimateUsage(messages, fullText) };
+    return { text: fullText.trim(), usage: usage || estimateUsage(providerMessages, fullText) };
   }
 }
