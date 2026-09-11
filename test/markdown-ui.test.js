@@ -19,6 +19,13 @@ test('markdown observer only rewrites raw text nodes and loads dedicated styles'
   assert.match(uiSource, /markdownToSafeHtml\(raw\)/);
 });
 
+test('markdown rendering is deferred while an AI bubble is actively streaming', () => {
+  assert.match(uiSource, /bubble\.classList\.contains\('typing'\)/);
+  assert.match(uiSource, /attributes: true/);
+  assert.match(uiSource, /attributeFilter: \['class'\]/);
+  assert.match(uiSource, /!target\.classList\.contains\('typing'\)/);
+});
+
 test('markdown stylesheet defines readable blocks for common model output', () => {
   assert.match(cssSource, /\.bubble\.markdown p/);
   assert.match(cssSource, /\.bubble\.markdown ul/);
