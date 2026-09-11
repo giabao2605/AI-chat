@@ -1,0 +1,162 @@
+.message.a .bubble.markdown,
+.message.b .bubble.markdown {
+  white-space: normal;
+  line-height: 1.68;
+  overflow-wrap: anywhere;
+}
+
+.bubble.markdown > :first-child {
+  margin-top: 0;
+}
+
+.bubble.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.bubble.markdown p {
+  margin: 0 0 .82em;
+}
+
+.bubble.markdown strong {
+  color: #f7f9fc;
+  font-weight: 720;
+}
+
+.bubble.markdown em {
+  color: #e2e7ee;
+}
+
+.bubble.markdown del {
+  color: #8d98a8;
+}
+
+.bubble.markdown ul,
+.bubble.markdown ol {
+  margin: .45em 0 .9em;
+  padding-left: 1.5em;
+}
+
+.bubble.markdown li {
+  margin: .24em 0;
+  padding-left: .12em;
+}
+
+.bubble.markdown li::marker {
+  color: #8392a8;
+}
+
+.bubble.markdown h1,
+.bubble.markdown h2,
+.bubble.markdown h3,
+.bubble.markdown h4,
+.bubble.markdown h5,
+.bubble.markdown h6 {
+  margin: 1.05em 0 .48em;
+  color: #f4f7fb;
+  font-weight: 740;
+  line-height: 1.3;
+  letter-spacing: -.015em;
+}
+
+.bubble.markdown h1 { font-size: 1.24em; }
+.bubble.markdown h2 { font-size: 1.17em; }
+.bubble.markdown h3 { font-size: 1.1em; }
+.bubble.markdown h4,
+.bubble.markdown h5,
+.bubble.markdown h6 { font-size: 1.02em; }
+
+.bubble.markdown blockquote {
+  margin: .75em 0 .9em;
+  padding: .12em 0 .12em .95em;
+  border-left: 2px solid rgba(148, 163, 184, .3);
+  color: #c8d0dc;
+}
+
+.bubble.markdown code {
+  padding: .14em .38em;
+  border: 1px solid rgba(148, 163, 184, .14);
+  border-radius: 5px;
+  background: rgba(148, 163, 184, .09);
+  color: #dce7ff;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: .9em;
+}
+
+.bubble.markdown pre {
+  max-width: 100%;
+  margin: .72em 0 1em;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border: 1px solid rgba(148, 163, 184, .14);
+  border-radius: 9px;
+  background: #0b0e14;
+  line-height: 1.55;
+  tab-size: 2;
+}
+
+.bubble.markdown pre code {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #dfe6ef;
+  white-space: pre;
+}
+
+.bubble.markdown a {
+  color: #9fbcff;
+  text-decoration: underline;
+  text-decoration-color: rgba(159, 188, 255, .4);
+  text-underline-offset: 2px;
+}
+
+.bubble.markdown a:hover {
+  color: #c3d5ff;
+  text-decoration-color: currentColor;
+}
+
+.bubble.markdown hr {
+  height: 1px;
+  margin: 1em 0;
+  border: 0;
+  background: rgba(148, 163, 184, .17);
+}
+
+.bubble.markdown table {
+  display: block;
+  max-width: 100%;
+  margin: .75em 0 1em;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: .94em;
+}
+
+.bubble.markdown th,
+.bubble.markdown td {
+  padding: 7px 10px;
+  border: 1px solid rgba(148, 163, 184, .16);
+  text-align: left;
+  vertical-align: top;
+}
+
+.bubble.markdown th {
+  background: rgba(148, 163, 184, .07);
+  color: #edf2f8;
+  font-weight: 700;
+}
+
+.bubble.markdown.typing::after {
+  display: inline-block;
+  margin-left: 2px;
+}
+
+@media (max-width: 620px) {
+  .message.a .bubble.markdown,
+  .message.b .bubble.markdown {
+    line-height: 1.62;
+  }
+
+  .bubble.markdown pre {
+    padding: 10px 11px;
+  }
+}
