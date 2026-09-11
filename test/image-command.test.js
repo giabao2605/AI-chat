@@ -24,7 +24,7 @@ test('slash suggestion appears while typing the command and hides after the prom
   assert.equal(shouldSuggestImageCommand('/'), true);
   assert.equal(shouldSuggestImageCommand('/i'), true);
   assert.equal(shouldSuggestImageCommand('/img_gen'), true);
-  assert.equal(shouldSuggestImageCommand('/img_gen '), true);
+  assert.equal(shouldSuggestImageCommand('/img_gen '), false);
   assert.equal(shouldSuggestImageCommand('/img_gen sky'), false);
   assert.equal(shouldSuggestImageCommand('hello /'), false);
 });
