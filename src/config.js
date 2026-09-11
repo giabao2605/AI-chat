@@ -47,18 +47,18 @@ export function getAgentConfig(id) {
 }
 
 export function getWebSearchConfig() {
-  const apiKey = String(process.env.BRAVE_SEARCH_API_KEY || '').trim();
+  const apiKey = String(process.env.TAVILY_API_KEY || '').trim();
   const enabled = boolFromEnv('WEB_SEARCH_ENABLED', Boolean(apiKey)) && Boolean(apiKey);
   return {
-    provider: 'brave',
+    provider: 'tavily',
     enabled,
     configured: Boolean(apiKey),
     apiKey,
-    endpoint: String(process.env.BRAVE_SEARCH_ENDPOINT || 'https://api.search.brave.com/res/v1/web/search').trim(),
+    endpoint: String(process.env.TAVILY_SEARCH_ENDPOINT || 'https://api.tavily.com/search').trim(),
     country: String(process.env.WEB_SEARCH_COUNTRY || '').trim(),
-    language: String(process.env.WEB_SEARCH_LANGUAGE || '').trim(),
     maxResultsPerQuery: Math.max(2, Math.min(20, intFromEnv('WEB_SEARCH_RESULTS_PER_QUERY', 8))),
     maxSources: Math.max(2, Math.min(20, intFromEnv('WEB_SEARCH_MAX_SOURCES', 8))),
+    maxQueries: Math.max(1, Math.min(3, intFromEnv('WEB_SEARCH_MAX_QUERIES', 2))),
     timeoutMs: Math.max(1000, intFromEnv('WEB_SEARCH_TIMEOUT_MS', 15000)),
     trustedDomains: listFromEnv('WEB_SEARCH_TRUSTED_DOMAINS'),
   };
@@ -86,7 +86,6 @@ export function getPublicConfig() {
       enabled: webSearch.enabled,
       configured: webSearch.configured,
       country: webSearch.country,
-      language: webSearch.language,
     },
     defaults: {
       sharedPrompt: DEFAULT_SHARED_PROMPT,

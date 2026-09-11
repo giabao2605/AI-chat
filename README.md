@@ -26,7 +26,7 @@ Project ưu tiên sự đơn giản và ổn định: **Node.js 22 thuần + Ser
 Web search không phụ thuộc vào việc model là GPT, Claude hay model khác. Orchestrator thực hiện ba bước:
 
 1. Trước mỗi lượt, chính agent chạy một **planning pass ngắn** để quyết định có cần dữ liệu web mới hay không. Các câu hỏi như thời tiết, tin tức, giá, phiên bản, dữ liệu hiện tại hoặc yêu cầu xác minh thường kích hoạt search; hội thoại/suy luận thông thường thì không.
-2. Nếu cần, backend gọi **Brave Search API** bằng tool riêng ở `src/web-search.js`. Agent không cần provider hỗ trợ function calling hay native web search.
+2. Nếu cần, backend gọi **Tavily Search API** bằng tool riêng ở `src/web-search.js`. Agent không cần provider hỗ trợ function calling hay native web search.
 3. Kết quả từ nhiều URL được chuẩn hóa, loại trùng, giới hạn số kết quả trên cùng một domain và xếp hạng lại. Nguồn chính thức như `.gov`, `.edu`, `.int` và một số nguồn primary/wire đáng tin cậy được ưu tiên. Sau đó evidence được đưa lại cho model để tự tổng hợp kết luận.
 
 Khi có dữ liệu web, system context yêu cầu agent:
@@ -39,24 +39,29 @@ Khi có dữ liệu web, system context yêu cầu agent:
 
 Planning pass cũng dùng token của model và được cộng vào tổng token của agent để thống kê không bị “giấu chi phí”. Search API tự nó không dùng token model, nhưng evidence đưa vào lượt trả lời cuối sẽ làm tăng input token.
 
-### Bật web search
+### Bật web search bằng Tavily
 
-Tạo một Brave Search API key rồi thêm vào `.env`:
+Tavily hiện có gói Researcher miễn phí với 1.000 API credits/tháng và không yêu cầu thẻ. Tạo API key trên Tavily rồi thêm vào `.env`:
 
 ```env
-BRAVE_SEARCH_API_KEY=your-brave-search-key
+TAVILY_API_KEY=tvly-your-key
 WEB_SEARCH_ENABLED=true
 ```
 
-Khi có `BRAVE_SEARCH_API_KEY`, web search mặc định được bật; có thể tắt tạm bằng `WEB_SEARCH_ENABLED=false`.
+Khi có `TAVILY_API_KEY`, web search mặc định được bật; có thể tắt tạm bằng `WEB_SEARCH_ENABLED=false`.
+
+App cố định `search_depth=basic` và `auto_parameters=false` để giữ chi phí ở mức **1 credit cho mỗi search request**. Mặc định một lượt research chạy tối đa 2 query, vì vậy một lượt AI search web dùng tối đa khoảng 2 Tavily credits.
 
 Các tùy chọn:
 
 ```env
 # Để trống để search rộng toàn cầu.
+# Tavily dùng tên quốc gia, ví dụ vietnam, united states.
+# App cũng tự đổi một số alias phổ biến như VN -> vietnam.
 WEB_SEARCH_COUNTRY=
-WEB_SEARCH_LANGUAGE=
 
+# Giới hạn số query để kiểm soát free quota.
+WEB_SEARCH_MAX_QUERIES=2
 WEB_SEARCH_RESULTS_PER_QUERY=8
 WEB_SEARCH_MAX_SOURCES=8
 WEB_SEARCH_TIMEOUT_MS=15000
@@ -68,11 +73,10 @@ WEB_SEARCH_TRUSTED_DOMAINS=who.int,nasa.gov,reuters.com
 Nếu chủ yếu hỏi dữ liệu Việt Nam, có thể đặt:
 
 ```env
-WEB_SEARCH_COUNTRY=VN
-WEB_SEARCH_LANGUAGE=vi
+WEB_SEARCH_COUNTRY=vietnam
 ```
 
-Không nên ép `WEB_SEARCH_LANGUAGE=vi` nếu muốn agent thường xuyên tham khảo tài liệu gốc tiếng Anh, vì việc giới hạn ngôn ngữ có thể làm giảm độ phủ nguồn.
+Không cần ép ngôn ngữ tìm kiếm. Việc để search tự do giúp agent có thể dùng cả nguồn Việt Nam lẫn tài liệu gốc tiếng Anh.
 
 ## Lịch sử trò chuyện
 
@@ -116,7 +120,7 @@ AGENT_B_API_KEY=your-key-b
 AGENT_B_MODEL=your-model-b
 
 # Optional independent web research
-BRAVE_SEARCH_API_KEY=your-brave-search-key
+TAVILY_API_KEY=tvly-your-key
 WEB_SEARCH_ENABLED=true
 
 HOST=127.0.0.1
@@ -148,7 +152,7 @@ Dev mode có auto-reload:
 npm run dev
 ```
 
-Khi server khởi động, terminal sẽ in `Web search: enabled (brave)` nếu tool được cấu hình và bật.
+Khi server khởi động, terminal sẽ in `Web search: enabled (tavily)` nếu tool được cấu hình và bật.
 
 ## Test
 
@@ -157,7 +161,7 @@ npm test
 npm run check
 ```
 
-Test suite có mock OpenAI-compatible streaming server và mock Brave Search nên không tiêu tốn token/search quota thật. Có test riêng cho chuẩn hóa nguồn, chống URL không hợp lệ, đa dạng domain, planning pass và integration từ research -> grounded final answer.
+Test suite có mock OpenAI-compatible streaming server và mock Tavily Search nên không tiêu tốn token/search quota thật. Có test riêng cho chuẩn hóa nguồn, chống URL không hợp lệ, đa dạng domain, free-tier request settings, planning pass và integration từ research -> grounded final answer.
 
 ## Token counter
 
