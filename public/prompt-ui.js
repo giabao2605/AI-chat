@@ -16,6 +16,7 @@ if (resumeAutoStart) localStorage.setItem(autoStartKey, '0');
 
 let defaults = createPromptSettings({ sharedPrompt: '', personaA: '', personaB: '' }, null);
 let saved = null;
+let autoSaveTimer = 0;
 
 function current(savedAt = new Date().toISOString()) {
   return createPromptSettings({
@@ -36,11 +37,11 @@ function refreshState() {
   const dirty = !promptSettingsEqual(current(saved.savedAt), saved);
   saveBtn.disabled = !dirty;
   if (dirty) {
-    status.textContent = 'Có thay đổi chưa lưu. Bấm Lưu prompt hoặc Bắt đầu phiên để lưu và áp dụng.';
+    status.textContent = 'Đang chờ tự lưu thay đổi...';
   } else if (saved.savedAt) {
-    status.textContent = `Đã lưu lúc ${formatSavedAt(saved.savedAt)}. Prompt này sẽ được gửi dưới dạng system prompt từ phiên tiếp theo.`;
+    status.textContent = `Đã lưu lúc ${formatSavedAt(saved.savedAt)}. Prompt này sẽ được giữ nguyên sau khi reload hoặc cập nhật code.`;
   } else {
-    status.textContent = 'Đang dùng prompt mặc định. Thay đổi rồi bấm Lưu prompt để giữ lại sau khi reload.';
+    status.textContent = 'Đang dùng prompt mặc định.';
   }
 }
 
@@ -52,23 +53,39 @@ function apply(settings) {
 }
 
 function save({ announce = true } = {}) {
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = 0;
+  const candidate = current(saved?.savedAt || new Date().toISOString());
+  if (saved && promptSettingsEqual(candidate, saved)) {
+    refreshState();
+    return saved;
+  }
+
   const next = current();
   try {
     localStorage.setItem(PROMPT_SETTINGS_STORAGE_KEY, JSON.stringify(next));
     saved = next;
     refreshState();
-    if (announce) status.textContent = `Đã lưu lúc ${formatSavedAt(next.savedAt)}. Prompt này sẽ được gửi dưới dạng system prompt từ phiên tiếp theo.`;
+    if (announce) status.textContent = `Đã lưu lúc ${formatSavedAt(next.savedAt)}. Prompt này sẽ được giữ nguyên sau khi reload hoặc cập nhật code.`;
   } catch {
     status.textContent = 'Không thể lưu vào bộ nhớ trình duyệt. Nội dung hiện tại vẫn được dùng khi bắt đầu phiên.';
   }
   return next;
 }
 
+function scheduleAutoSave() {
+  refreshState();
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => save({ announce: false }), 350);
+}
+
 function restoreDefaults() {
-  try { localStorage.removeItem(PROMPT_SETTINGS_STORAGE_KEY); } catch {}
-  saved = createPromptSettings(defaults, null);
+  clearTimeout(autoSaveTimer);
+  const next = createPromptSettings(defaults);
+  try { localStorage.setItem(PROMPT_SETTINGS_STORAGE_KEY, JSON.stringify(next)); } catch {}
+  saved = next;
   apply(saved);
-  status.textContent = 'Đã khôi phục prompt mặc định của app.';
+  status.textContent = 'Đã khôi phục và lưu prompt mặc định hiện tại của app.';
 }
 
 async function waitForMainApp() {
@@ -86,16 +103,24 @@ async function init() {
   } catch {}
 
   await waitForMainApp();
-  saved = parseStoredPromptSettings(localStorage.getItem(PROMPT_SETTINGS_STORAGE_KEY)) || createPromptSettings(defaults, null);
+  const stored = parseStoredPromptSettings(localStorage.getItem(PROMPT_SETTINGS_STORAGE_KEY));
+  saved = stored || createPromptSettings(defaults);
   apply(saved);
 
-  for (const field of Object.values(fields)) field.addEventListener('input', refreshState);
+  // Persist the resolved baseline immediately. Future app versions may ship a new
+  // default prompt, but this browser keeps the current prompt until Reset is used.
+  if (!stored) {
+    try { localStorage.setItem(PROMPT_SETTINGS_STORAGE_KEY, JSON.stringify(saved)); } catch {}
+  }
+
+  for (const field of Object.values(fields)) field.addEventListener('input', scheduleAutoSave);
   saveBtn.addEventListener('click', () => save());
   resetBtn.addEventListener('click', restoreDefaults);
 
   // Capture runs before app.js' normal click listener. The exact text visible in the
   // fields is therefore persisted immediately before app.js builds /api/start payload.
   startBtn.addEventListener('click', () => save({ announce: false }), true);
+  window.addEventListener('pagehide', () => save({ announce: false }));
 
   if (resumeAutoStart) {
     const autoStart = $('autoStart');
