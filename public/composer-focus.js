@@ -1,4 +1,5 @@
 import './markdown-ui.js';
+import './image-tool-ui.js';
 
 const form = document.getElementById('userForm');
 const input = document.getElementById('userInput');
