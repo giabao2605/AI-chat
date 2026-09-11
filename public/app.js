@@ -67,15 +67,17 @@ function messageNode(message, streaming = false) {
   meta.append(name, usage);
   const bubble = document.createElement('div');
   bubble.className = `bubble${streaming ? ' typing' : ''}`;
-  bubble.textContent = message.text || '';
+  const initialText = message.text || '';
+  const textNode = document.createTextNode(initialText);
+  bubble.append(textNode);
   body.append(meta, bubble);
   wrapper.append(avatar, body);
-  return { wrapper, bubble, usage, pending: '', rendered: message.text || '', frame: 0, finalPayload: null };
+  return { wrapper, bubble, usage, textNode, rendered: initialText, scrollFrame: 0, finalPayload: null };
 }
 
 function cancelStreamFrame(node) {
-  if (node?.frame) cancelAnimationFrame(node.frame);
-  if (node) node.frame = 0;
+  if (node?.scrollFrame) cancelAnimationFrame(node.scrollFrame);
+  if (node) node.scrollFrame = 0;
 }
 
 function clearChat() {
@@ -105,59 +107,53 @@ function scrollChat(force = false) {
   if (force || followTail) els.chat.scrollTop = els.chat.scrollHeight;
 }
 
-function finalizeStream(messageId) {
-  const node = streamNodes.get(messageId);
-  if (!node || !node.finalPayload || node.pending.length) return;
-  const data = node.finalPayload;
-  node.bubble.classList.remove('typing');
-  if (node.rendered !== data.text) {
-    node.rendered = data.text || node.rendered;
-    node.bubble.textContent = node.rendered;
-  }
-  if (data.usage) node.usage.textContent = `${formatNumber(data.usage.totalTokens)} token${data.usage.exact === false ? ' ~' : ''}`;
-  streamNodes.delete(messageId);
-  if (followTail) scrollChat(true);
+function scheduleStreamScroll(node) {
+  if (!node || !followTail || node.scrollFrame) return;
+  node.scrollFrame = requestAnimationFrame(() => {
+    node.scrollFrame = 0;
+    if (followTail) scrollChat(true);
+  });
 }
 
-function flushStream(messageId) {
+function finalizeStream(messageId) {
   const node = streamNodes.get(messageId);
-  if (!node) return;
-  node.frame = 0;
-
-  // Batch every delta that arrived during this animation frame, then paint all of it at once.
-  // This keeps DOM updates capped near 60 fps without intentionally slowing a fast provider.
-  if (node.pending.length) {
-    node.rendered += node.pending;
-    node.pending = '';
-    node.bubble.textContent = node.rendered;
-    if (followTail) scrollChat(true);
+  if (!node || !node.finalPayload) return;
+  const data = node.finalPayload;
+  const finalText = data.text || node.rendered;
+  if (finalText !== node.rendered) {
+    node.rendered = finalText;
+    node.textNode.nodeValue = finalText;
   }
-
-  if (node.pending.length) {
-    node.frame = requestAnimationFrame(() => flushStream(messageId));
-  } else if (node.finalPayload) {
-    finalizeStream(messageId);
-  }
+  node.bubble.classList.remove('typing');
+  if (data.usage) node.usage.textContent = `${formatNumber(data.usage.totalTokens)} token${data.usage.exact === false ? ' ~' : ''}`;
+  cancelStreamFrame(node);
+  streamNodes.delete(messageId);
+  if (followTail) requestAnimationFrame(() => scrollChat(true));
 }
 
 function queueStreamDelta(messageId, delta) {
   const node = streamNodes.get(messageId);
   if (!node || !delta) return;
-  node.pending += delta;
-  if (!node.frame) node.frame = requestAnimationFrame(() => flushStream(messageId));
+  node.rendered += delta;
+  node.textNode.appendData(delta);
+  scheduleStreamScroll(node);
 }
 
 function completeStream(messageId, payload) {
   const node = streamNodes.get(messageId);
   if (!node) return false;
   node.finalPayload = payload;
-  const knownText = node.rendered + node.pending;
-  if (payload.text && payload.text !== knownText) {
-    if (payload.text.startsWith(knownText)) node.pending += payload.text.slice(knownText.length);
-    else if (!node.rendered) node.pending = payload.text;
+  if (payload.text && payload.text !== node.rendered) {
+    if (payload.text.startsWith(node.rendered)) {
+      const tail = payload.text.slice(node.rendered.length);
+      node.rendered += tail;
+      node.textNode.appendData(tail);
+    } else {
+      node.rendered = payload.text;
+      node.textNode.nodeValue = payload.text;
+    }
   }
-  if (node.pending.length && !node.frame) node.frame = requestAnimationFrame(() => flushStream(messageId));
-  if (!node.pending.length) finalizeStream(messageId);
+  finalizeStream(messageId);
   return true;
 }
 
@@ -414,7 +410,7 @@ function connectEvents() {
     const existing = streamNodes.get(data.id);
     if (existing) {
       cancelStreamFrame(existing);
-      const partial = existing.rendered + existing.pending;
+      const partial = existing.rendered;
       existing.bubble.classList.remove('typing');
       existing.bubble.classList.add('failed');
       existing.bubble.textContent = partial ? `${partial}\n\n[Lượt trả lời bị gián đoạn]` : '[Lượt trả lời bị lỗi]';

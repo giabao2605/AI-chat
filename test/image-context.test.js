@@ -29,6 +29,33 @@ test('image context resolver hydrates only the latest configured generated image
   }
 });
 
+test('generated image remains available until both agents have replied after it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ai-chat-vision-'));
+  const generated = join(root, 'generated');
+  await mkdir(generated, { recursive: true });
+  await writeFile(join(generated, 'scene.png'), ONE_PIXEL_PNG);
+
+  try {
+    const resolveImages = createImageContextResolver({ publicDir: root, maxImages: 1, maxBytes: 1024 * 1024 });
+    const attachment = { type: 'image', url: '/generated/scene.png' };
+
+    const oneAgentReplied = await resolveImages([
+      { speaker: 'tool', text: 'image', attachments: [attachment] },
+      { speaker: 'a', text: 'đã xem ảnh' },
+    ]);
+    assert.match(oneAgentReplied[0].attachments[0].dataUrl, /^data:image\/png;base64,/);
+
+    const bothAgentsReplied = await resolveImages([
+      { speaker: 'tool', text: 'image', attachments: [attachment] },
+      { speaker: 'a', text: 'đã xem ảnh' },
+      { speaker: 'b', text: 'cũng đã xem ảnh' },
+    ]);
+    assert.equal(bothAgentsReplied[0].attachments[0].dataUrl, undefined, 'old image should stop inflating later requests');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('local image resolver rejects path traversal outside generated directory', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ai-chat-vision-'));
   try {

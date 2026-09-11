@@ -19,6 +19,7 @@ function rawTextSource(bubble) {
 }
 
 function renderBubble(bubble) {
+  if (!(bubble instanceof HTMLElement) || bubble.classList.contains('typing')) return;
   const raw = rawTextSource(bubble);
   if (raw === null) return;
   bubble.classList.add('markdown');
@@ -40,23 +41,39 @@ if (chat) {
   const observer = new MutationObserver((mutations) => {
     const candidates = new Set();
     for (const mutation of mutations) {
+      if (mutation.type === 'attributes') {
+        const target = mutation.target;
+        if (target instanceof HTMLElement && target.matches(AI_BUBBLE_SELECTOR) && !target.classList.contains('typing')) {
+          candidates.add(target);
+        }
+        continue;
+      }
+
       if (mutation.target instanceof HTMLElement && mutation.target.matches(AI_BUBBLE_SELECTOR)) {
-        candidates.add(mutation.target);
+        if (!mutation.target.classList.contains('typing')) candidates.add(mutation.target);
       } else if (mutation.target?.nodeType === Node.TEXT_NODE) {
         const parent = mutation.target.parentElement;
-        if (parent?.matches?.(AI_BUBBLE_SELECTOR)) candidates.add(parent);
+        if (parent?.matches?.(AI_BUBBLE_SELECTOR) && !parent.classList.contains('typing')) candidates.add(parent);
       }
       for (const node of mutation.addedNodes) {
-        if (node instanceof HTMLElement && node.matches(AI_BUBBLE_SELECTOR)) candidates.add(node);
+        if (node instanceof HTMLElement && node.matches(AI_BUBBLE_SELECTOR) && !node.classList.contains('typing')) candidates.add(node);
         if (node instanceof HTMLElement) {
-          for (const bubble of node.querySelectorAll(AI_BUBBLE_SELECTOR)) candidates.add(bubble);
+          for (const bubble of node.querySelectorAll(AI_BUBBLE_SELECTOR)) {
+            if (!bubble.classList.contains('typing')) candidates.add(bubble);
+          }
         }
       }
     }
     for (const bubble of candidates) renderBubble(bubble);
   });
 
-  observer.observe(chat, { subtree: true, childList: true, characterData: true });
+  observer.observe(chat, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ['class'],
+  });
 }
 
 export { rawTextSource, renderBubble, scanNode };

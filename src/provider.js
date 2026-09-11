@@ -184,6 +184,7 @@ export class OpenAICompatibleProvider {
     this.model = model;
     this.visionSupport = null;
     this.toolSupport = null;
+    this.streamUsageSupport = null;
   }
 
   async streamChat({
@@ -212,22 +213,28 @@ export class OpenAICompatibleProvider {
     });
 
     let body = makeBody();
+    let includeUsage = this.streamUsageSupport !== false;
     let response = await requestStream({
       endpoint: this.endpoint,
       apiKey: this.apiKey,
       body,
       signal,
-      includeUsage: true,
+      includeUsage,
     });
 
-    if (!response.ok && [400, 404, 422].includes(response.status)) {
-      response = await requestStream({
+    if (!response.ok && includeUsage && [400, 404, 422].includes(response.status)) {
+      const retry = await requestStream({
         endpoint: this.endpoint,
         apiKey: this.apiKey,
         body,
         signal,
         includeUsage: false,
       });
+      if (retry.ok) this.streamUsageSupport = false;
+      response = retry;
+      includeUsage = false;
+    } else if (response.ok && includeUsage) {
+      this.streamUsageSupport = true;
     }
 
     if (!response.ok && multimodal && !visionFallback && [400, 404, 415, 422].includes(response.status)) {

@@ -36,6 +36,19 @@ export async function localImageToDataUrl(publicDir, publicUrl, maxBytes = 8 * 1
 export function createImageContextResolver({ publicDir, maxImages = 1, maxBytes = 8 * 1024 * 1024 } = {}) {
   const imageLimit = Math.max(0, Number(maxImages) || 0);
   const byteLimit = Math.max(1024 * 1024, Number(maxBytes) || 8 * 1024 * 1024);
+  const cacheLimit = Math.max(4, imageLimit * 4);
+  const dataUrlCache = new Map();
+
+  async function cachedDataUrl(publicUrl) {
+    if (dataUrlCache.has(publicUrl)) return dataUrlCache.get(publicUrl);
+    const dataUrl = await localImageToDataUrl(publicDir, publicUrl, byteLimit);
+    dataUrlCache.set(publicUrl, dataUrl);
+    while (dataUrlCache.size > cacheLimit) {
+      const oldest = dataUrlCache.keys().next().value;
+      dataUrlCache.delete(oldest);
+    }
+    return dataUrl;
+  }
 
   return async function resolveImageContext(history = []) {
     if (!imageLimit || !Array.isArray(history) || !history.length) return history;
@@ -47,19 +60,25 @@ export function createImageContextResolver({ publicDir, maxImages = 1, maxBytes 
     }));
 
     let remaining = imageLimit;
+    const aiSpeakersAfter = new Set();
     for (let i = cloned.length - 1; i >= 0 && remaining > 0; i -= 1) {
       const item = cloned[i];
-      if (!Array.isArray(item.attachments)) continue;
-      for (let j = item.attachments.length - 1; j >= 0 && remaining > 0; j -= 1) {
-        const attachment = item.attachments[j];
-        if (attachment?.type !== 'image' || !String(attachment.url || '').startsWith('/generated/')) continue;
-        try {
-          attachment.dataUrl = await localImageToDataUrl(publicDir, attachment.url, byteLimit);
-          remaining -= 1;
-        } catch (error) {
-          attachment.visionError = error?.message || String(error);
+      const alreadySeenByBothAgents = aiSpeakersAfter.has('a') && aiSpeakersAfter.has('b');
+
+      if (!alreadySeenByBothAgents && Array.isArray(item.attachments)) {
+        for (let j = item.attachments.length - 1; j >= 0 && remaining > 0; j -= 1) {
+          const attachment = item.attachments[j];
+          if (attachment?.type !== 'image' || !String(attachment.url || '').startsWith('/generated/')) continue;
+          try {
+            attachment.dataUrl = await cachedDataUrl(attachment.url);
+            remaining -= 1;
+          } catch (error) {
+            attachment.visionError = error?.message || String(error);
+          }
         }
       }
+
+      if (item?.speaker === 'a' || item?.speaker === 'b') aiSpeakersAfter.add(item.speaker);
     }
     return cloned;
   };
