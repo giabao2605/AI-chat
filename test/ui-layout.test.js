@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 const index = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
 const layout = await readFile(new URL('../public/layout-v2.css', import.meta.url), 'utf8');
 const visual = await readFile(new URL('../public/ui-v3.css', import.meta.url), 'utf8');
+const chatV4 = await readFile(new URL('../public/chat-v4.css', import.meta.url), 'utf8');
 
 test('header branding is removed and status/history live inside Control Room', () => {
   assert.doesNotMatch(index, /AI CONVERSATION LAB/);
@@ -39,4 +40,13 @@ test('visual polish stylesheet and control hierarchy are present', () => {
   assert.match(visual, /\.message\.user \.bubble[\s\S]*background:/);
   assert.match(visual, /\.control-monitor[\s\S]*border:\s*0/);
   assert.match(visual, /\.control-footer[\s\S]*position:\s*sticky/);
+});
+
+test('chat v4 uses Apple system typography and wider opposing AI lanes', () => {
+  assert.match(index, /href="\/chat-v4\.css"/);
+  assert.match(chatV4, /font-family:\s*-apple-system,\s*BlinkMacSystemFont/);
+  assert.match(chatV4, /\.message\.b\s*\{[\s\S]*flex-direction:\s*row-reverse/);
+  assert.match(chatV4, /\.message\.a \.message-body,[\s\S]*\.message\.b \.message-body[\s\S]*width:\s*min\(78%,\s*980px\)/);
+  assert.match(chatV4, /\.message\.a \.bubble,[\s\S]*\.message\.b \.bubble[\s\S]*font-size:\s*15\.75px/);
+  assert.match(chatV4, /@media \(min-width:\s*1500px\)[\s\S]*font-size:\s*16px/);
 });
