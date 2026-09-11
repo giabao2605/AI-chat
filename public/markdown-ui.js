@@ -1,5 +1,13 @@
 import { markdownToSafeHtml } from './markdown.js';
 
+if (!document.querySelector('link[data-markdown-ui]')) {
+  const stylesheet = document.createElement('link');
+  stylesheet.rel = 'stylesheet';
+  stylesheet.href = '/markdown.css';
+  stylesheet.dataset.markdownUi = '1';
+  document.head.append(stylesheet);
+}
+
 const chat = document.getElementById('chat');
 const AI_BUBBLE_SELECTOR = '.message.a .bubble, .message.b .bubble';
 
