@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAgentConfig, getImageGenConfig, getPublicConfig, getServerConfig, getWebSearchConfig } from './config.js';
+import { CloudflareImageTool } from './cloudflare-image-tool.js';
 import { OpenAICompatibleImageTool } from './image-tool.js';
 import { ResumableConversationRoom } from './resumable-room.js';
 import { TavilyWebSearch } from './web-search.js';
@@ -14,11 +15,33 @@ const serverConfig = getServerConfig();
 const webSearchConfig = getWebSearchConfig();
 const webSearch = webSearchConfig.enabled ? new TavilyWebSearch(webSearchConfig) : null;
 const imageGenConfig = getImageGenConfig();
-const imageTool = imageGenConfig.enabled ? new OpenAICompatibleImageTool({
-  ...imageGenConfig,
-  outputDir: join(publicDir, 'generated'),
-  publicPrefix: '/generated',
-}) : null;
+
+function createImageTool(config) {
+  if (!config.enabled) return null;
+  const shared = {
+    model: config.model,
+    timeoutMs: config.timeoutMs,
+    maxBytes: config.maxBytes,
+    outputDir: join(publicDir, 'generated'),
+    publicPrefix: '/generated',
+  };
+  if (config.provider === 'cloudflare') {
+    return new CloudflareImageTool({
+      ...shared,
+      accountId: config.cloudflareAccountId,
+      apiToken: config.cloudflareApiToken,
+    });
+  }
+  return new OpenAICompatibleImageTool({
+    ...shared,
+    baseUrl: config.baseUrl,
+    endpoint: config.endpoint,
+    apiKey: config.apiKey,
+    size: config.size,
+  });
+}
+
+const imageTool = createImageTool(imageGenConfig);
 const room = new ResumableConversationRoom({
   agentA: getAgentConfig('a'),
   agentB: getAgentConfig('b'),
@@ -107,6 +130,7 @@ async function handleApi(req, res, pathname) {
     status: room.status,
     webSearch: Boolean(webSearch),
     imageGen: Boolean(imageTool),
+    imageProvider: imageTool ? imageGenConfig.provider : null,
   });
   if (req.method === 'GET' && pathname === '/api/config') return json(res, 200, getPublicConfig());
   if (req.method === 'GET' && pathname === '/api/state') return json(res, 200, room.snapshot());
@@ -225,5 +249,5 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   console.log(`AI Chat Lab running at http://${serverConfig.host}:${serverConfig.port}`);
   console.log('API keys stay server-side. Configure them in .env; never commit that file.');
   console.log(`Web search: ${webSearch ? `enabled (${webSearchConfig.provider})` : 'disabled'}.`);
-  console.log(`Image generation: ${imageTool ? `enabled (${imageGenConfig.model})` : 'disabled'}.`);
+  console.log(`Image generation: ${imageTool ? `enabled (${imageGenConfig.provider}: ${imageGenConfig.model})` : 'disabled'}.`);
 });
