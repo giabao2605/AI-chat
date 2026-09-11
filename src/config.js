@@ -101,6 +101,13 @@ export function getImageInputConfig() {
   };
 }
 
+export function getAgentToolConfig() {
+  return {
+    imageGenerationEnabled: boolFromEnv('AGENT_IMAGE_TOOL_ENABLED', true),
+    maxImageCallsPerTurn: Math.max(0, Math.min(3, intFromEnv('AGENT_IMAGE_TOOL_MAX_CALLS_PER_TURN', 1))),
+  };
+}
+
 export function getServerConfig() {
   return {
     host: process.env.HOST || '127.0.0.1',
@@ -115,6 +122,7 @@ export function getPublicConfig() {
   const webSearch = getWebSearchConfig();
   const imageGen = getImageGenConfig();
   const imageInput = getImageInputConfig();
+  const agentTools = getAgentToolConfig();
   return {
     agents: {
       a: { id: 'a', name: a.name, model: a.model, baseUrl: a.baseUrl, configured: Boolean(a.apiKey && a.model && a.baseUrl) },
@@ -136,6 +144,10 @@ export function getPublicConfig() {
     imageInput: {
       enabled: imageInput.enabled,
       maxImages: imageInput.maxImages,
+    },
+    agentTools: {
+      imageGenerationEnabled: agentTools.imageGenerationEnabled && imageGen.enabled,
+      maxImageCallsPerTurn: agentTools.maxImageCallsPerTurn,
     },
     defaults: {
       sharedPrompt: DEFAULT_SHARED_PROMPT,
