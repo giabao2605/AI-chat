@@ -20,6 +20,8 @@ if (form && input) {
   }
 
   form.addEventListener('submit', () => {
-    focusWhenComposerReady();
+    // Run after every submit listener has completed its synchronous work.
+    // app.js disables the input while the request is in flight, then re-enables it in finally.
+    queueMicrotask(focusWhenComposerReady);
   });
 }
