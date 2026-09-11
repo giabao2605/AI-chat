@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { DEFAULT_SHARED_PROMPT } from './config.js';
 import { OpenAICompatibleProvider } from './provider.js';
 import { buildWebResearchContext, decideWebResearch } from './research.js';
+import { decideConversationEnd } from './conversation-end.js';
 
 function clamp(value, min, max, fallback) {
   const n = Number(value);
@@ -22,6 +23,10 @@ function sourceMetadata(source) {
     age: source.age || '',
     query: source.query || '',
   };
+}
+
+function isTerminalStatus(status) {
+  return ['stopped', 'idle', 'error', 'completed'].includes(status);
 }
 
 export function buildMessagesForAgent({ agentId, agentName, topic, history, sharedPrompt, personaPrompt }) {
@@ -71,6 +76,8 @@ export class ConversationRoom extends EventEmitter {
     this.currentSpeaker = null;
     this.settings = null;
     this.abortController = null;
+    this.endedBy = null;
+    this.endReason = '';
     this.emitState();
   }
 
@@ -84,6 +91,8 @@ export class ConversationRoom extends EventEmitter {
       currentSpeaker: this.currentSpeaker,
       history: this.history,
       stats: this.stats,
+      endedBy: this.endedBy,
+      endReason: this.endReason,
     };
   }
 
@@ -110,6 +119,8 @@ export class ConversationRoom extends EventEmitter {
     this.history = [];
     this.stats = blankStats();
     this.currentSpeaker = null;
+    this.endedBy = null;
+    this.endReason = '';
     this.maxTurns = Math.floor(clamp(input.maxTurns, 1, 100000, 20));
     if (this.hardTurnLimit > 0) this.maxTurns = Math.min(this.maxTurns, this.hardTurnLimit);
 
@@ -182,19 +193,32 @@ export class ConversationRoom extends EventEmitter {
   async runLoop(activeRunId = this.runId) {
     let speaker = this.firstSpeaker();
     try {
-      while (activeRunId === this.runId && this.turn < this.maxTurns && !['stopped', 'idle', 'error'].includes(this.status)) {
+      while (activeRunId === this.runId && this.turn < this.maxTurns && !isTerminalStatus(this.status)) {
         await this.waitUntilRunnable();
-        if (['stopped', 'idle', 'error'].includes(this.status)) break;
-        await this.runAgentTurn(speaker, activeRunId);
-        if (['stopped', 'idle', 'error'].includes(this.status)) break;
+        if (isTerminalStatus(this.status)) break;
+        const outcome = await this.runAgentTurn(speaker, activeRunId);
+        if (isTerminalStatus(this.status)) break;
+
         this.turn += 1;
+        if (outcome?.endSession) {
+          this.status = 'completed';
+          this.currentSpeaker = null;
+          this.endedBy = speaker;
+          this.endReason = safeText(outcome.reason, 500) || 'Cuộc trò chuyện đã đi tới hồi kết.';
+          this.emit('meta', { text: `${this.agentConfigs[speaker].name} đã kết thúc phiên: ${this.endReason}` });
+          this.emitState();
+          break;
+        }
+
         speaker = speaker === 'a' ? 'b' : 'a';
         this.emitState();
       }
       if (activeRunId === this.runId && this.status === 'running' && this.turn >= this.maxTurns) {
         this.status = 'completed';
         this.currentSpeaker = null;
-        this.emit('meta', { text: `Đã đạt giới hạn ${this.maxTurns} lượt.` });
+        this.endedBy = 'limit';
+        this.endReason = `Đã đạt giới hạn ${this.maxTurns} lượt.`;
+        this.emit('meta', { text: this.endReason });
         this.emitState();
       }
     } catch (error) {
@@ -281,7 +305,7 @@ export class ConversationRoom extends EventEmitter {
       if (error?.name === 'AbortError' || activeRunId !== this.runId) return;
       throw error;
     }
-    if (activeRunId !== this.runId || ['stopped', 'idle', 'error'].includes(this.status)) return;
+    if (activeRunId !== this.runId || isTerminalStatus(this.status)) return;
 
     this.emit('message:start', { id: messageId, speaker: agentId, name: agent.name });
     let result;
@@ -318,8 +342,28 @@ export class ConversationRoom extends EventEmitter {
     };
     this.history.push(entry);
     this.addUsage(agentId, result.usage, true);
-    this.currentSpeaker = null;
     this.emit('message:done', entry);
+
+    let endDecision = { end: false, reason: '' };
+    if (this.turn + 1 < this.maxTurns && activeRunId === this.runId && !isTerminalStatus(this.status)) {
+      endDecision = await decideConversationEnd({
+        provider: this.providers[agentId],
+        topic: this.topic,
+        history: this.history,
+        agentId,
+        agentName: agent.name,
+        signal: this.abortController.signal,
+      });
+      if (endDecision.usage) this.addUsage(agentId, endDecision.usage, false);
+    }
+
+    if (activeRunId !== this.runId) return;
+    this.currentSpeaker = null;
+    return {
+      entry,
+      endSession: endDecision.end === true,
+      reason: endDecision.reason || '',
+    };
   }
 
   addUsage(agentId, usage, countTurn) {

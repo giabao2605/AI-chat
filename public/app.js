@@ -1,4 +1,5 @@
 import { HISTORY_LIMIT, HISTORY_STORAGE_KEY, parseStoredHistory, removeHistoryRecord, upsertHistory } from './history.js';
+import { getComposerMode } from './composer-mode.js';
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -21,6 +22,7 @@ let state;
 let eventSource;
 let toastTimer;
 let viewingHistoryId = null;
+let composerSubmitting = false;
 let savedSessions = parseStoredHistory(localStorage.getItem(HISTORY_STORAGE_KEY));
 let followTail = true;
 const streamNodes = new Map();
@@ -285,11 +287,25 @@ function returnToLive() {
   renderHistoryList();
 }
 
+function agentsConfigured() {
+  return Boolean(config) && Object.values(config.agents || {}).every((agent) => agent.configured);
+}
+
+function currentComposerMode() {
+  return getComposerMode({
+    status: state?.status || 'idle',
+    configured: agentsConfigured(),
+    viewingHistory: Boolean(viewingHistoryId),
+    submitting: composerSubmitting,
+  });
+}
+
 function updateComposerState() {
-  const canJoin = !viewingHistoryId && Boolean(state?.topic) && ['running', 'paused', 'pausing'].includes(state?.status);
-  els.userInput.disabled = !canJoin;
-  els.sendBtn.disabled = !canJoin;
-  els.userInput.placeholder = viewingHistoryId ? 'Đang xem lịch sử. Quay lại phiên hiện tại để chat...' : 'Chen vào cuộc trò chuyện...';
+  const mode = currentComposerMode();
+  els.userInput.disabled = !mode.enabled;
+  els.sendBtn.disabled = !mode.enabled;
+  els.userInput.placeholder = mode.placeholder;
+  els.userForm.dataset.mode = mode.action;
 }
 
 function applyState(next, { history = false } = {}) {
@@ -303,9 +319,12 @@ function applyState(next, { history = false } = {}) {
   els.stopBtn.disabled = !active;
   els.pauseBtn.disabled = !running && !paused;
   els.pauseBtn.textContent = paused ? 'Tiếp tục' : (next.status === 'pausing' ? 'Đang tạm dừng…' : 'Tạm dừng');
+  const completedHint = next.endedBy && ['a', 'b'].includes(next.endedBy)
+    ? `${config?.agents?.[next.endedBy]?.name || 'AI'} đã kết thúc phiên.`
+    : 'Phiên đã hoàn thành.';
   els.liveHint.textContent = next.currentSpeaker
     ? `${config?.agents?.[next.currentSpeaker]?.name || next.currentSpeaker} đang trả lời...`
-    : ({ idle: 'Chưa bắt đầu phiên.', starting: 'Đang chuẩn bị phiên...', paused: 'Đã tạm dừng.', pausing: 'Sẽ tạm dừng sau lượt hiện tại.', stopped: 'Phiên đã dừng.', completed: 'Phiên đã hoàn thành.', error: 'Phiên gặp lỗi.' }[next.status] || 'Sẵn sàng.');
+    : ({ idle: 'Chưa bắt đầu phiên.', starting: 'Đang chuẩn bị phiên...', paused: 'Đã tạm dừng.', pausing: 'Sẽ tạm dừng sau lượt hiện tại.', stopped: 'Phiên đã dừng.', completed: completedHint, error: 'Phiên gặp lỗi.' }[next.status] || 'Sẵn sàng.');
   updateComposerState();
   if (!viewingHistoryId) {
     els.topicPreview.textContent = next.topic || 'Chưa có chủ đề.';
@@ -416,14 +435,27 @@ function connectEvents() {
   });
 }
 
+function buildStartPayload(topicMode, topic) {
+  return {
+    topicMode,
+    topic,
+    maxTurns: Number(els.maxTurns.value),
+    startSpeaker: els.startSpeaker.value,
+    temperature: Number(els.temperature.value),
+    maxOutputTokens: Number(els.maxOutputTokens.value),
+    sharedPrompt: els.sharedPrompt.value,
+    personaA: els.personaA.value,
+    personaB: els.personaB.value,
+  };
+}
+
 async function startConversation() {
   try {
     const topicMode = els.topicMode.value;
     const topic = els.topic.value.trim();
     if (topicMode === 'manual' && !topic) { toast('Hãy nhập chủ đề trước khi bắt đầu phiên.'); els.topic.focus(); return; }
     if (viewingHistoryId) returnToLive();
-    const payload = { topicMode, topic, maxTurns: Number(els.maxTurns.value), startSpeaker: els.startSpeaker.value, temperature: Number(els.temperature.value), maxOutputTokens: Number(els.maxOutputTokens.value), sharedPrompt: els.sharedPrompt.value, personaA: els.personaA.value, personaB: els.personaB.value };
-    await api('/api/start', { method: 'POST', body: JSON.stringify(payload) });
+    await api('/api/start', { method: 'POST', body: JSON.stringify(buildStartPayload(topicMode, topic)) });
     if (topicMode === 'manual') els.topic.value = '';
   } catch (error) { toast(error.message); }
 }
@@ -437,10 +469,26 @@ els.resetBtn.addEventListener('click', async () => { try { if (viewingHistoryId)
 els.userForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const text = els.userInput.value.trim();
-  if (!text || viewingHistoryId) return;
+  const mode = currentComposerMode();
+  if (!text || !mode.enabled || viewingHistoryId) return;
+
   els.userInput.value = '';
-  try { await api('/api/message', { method: 'POST', body: JSON.stringify({ text }) }); }
-  catch (error) { els.userInput.value = text; toast(error.message); }
+  composerSubmitting = true;
+  updateComposerState();
+  try {
+    if (mode.action === 'message') {
+      await api('/api/message', { method: 'POST', body: JSON.stringify({ text }) });
+    } else if (mode.action === 'start') {
+      const next = await api('/api/start', { method: 'POST', body: JSON.stringify(buildStartPayload('manual', text)) });
+      applyState(next, { history: true });
+    }
+  } catch (error) {
+    els.userInput.value = text;
+    toast(error.message);
+  } finally {
+    composerSubmitting = false;
+    updateComposerState();
+  }
 });
 els.historyBtn.addEventListener('click', openHistoryDrawer);
 els.closeHistoryBtn.addEventListener('click', closeHistoryDrawer);
