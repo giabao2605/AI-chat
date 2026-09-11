@@ -25,7 +25,9 @@ export function getForcedResearchPlan(topic, history = []) {
   if (!text) return null;
 
   const explicitSearch = EXPLICIT_SEARCH_PATTERN.test(text);
-  const realtimeIntent = WEATHER_PATTERN.test(text) || (LIVE_FACT_PATTERN.test(text) && FRESH_PATTERN.test(text));
+  const weatherIntent = WEATHER_PATTERN.test(text);
+  const temporalIntent = FRESH_PATTERN.test(text);
+  const realtimeIntent = weatherIntent || (LIVE_FACT_PATTERN.test(text) && temporalIntent);
   const mustSearch = isImmediateUserRequest || isInitialTopic
     ? explicitSearch || realtimeIntent
     : explicitSearch;
@@ -34,7 +36,7 @@ export function getForcedResearchPlan(topic, history = []) {
   return {
     search: true,
     queries: [text],
-    freshness: freshnessFromText(text),
+    freshness: realtimeIntent || temporalIntent ? freshnessFromText(text) : '',
     reason: explicitSearch ? 'deterministic-explicit-search' : 'deterministic-realtime-intent',
     forced: true,
   };
