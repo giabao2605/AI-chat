@@ -93,15 +93,11 @@
   }
 }
 
-/* Repeated smooth-scroll animations on every streamed token cause visible jitter. */
+/* `app.js` scrolls to the bottom on each stream delta. Smooth scrolling there
+   restarts an animation for every chunk and creates visible jitter. */
 .chat {
   scroll-behavior: auto;
   overflow-anchor: none;
-}
-
-.message,
-.bubble {
-  transform: translateZ(0);
 }
 
 .bubble.typing {
