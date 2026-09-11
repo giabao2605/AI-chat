@@ -4,13 +4,13 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAgentConfig, getPublicConfig, getServerConfig, getWebSearchConfig } from './config.js';
 import { ConversationRoom } from './orchestrator.js';
-import { BraveWebSearch } from './web-search.js';
+import { TavilyWebSearch } from './web-search.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = normalize(join(__dirname, '..', 'public'));
 const serverConfig = getServerConfig();
 const webSearchConfig = getWebSearchConfig();
-const webSearch = webSearchConfig.enabled ? new BraveWebSearch(webSearchConfig) : null;
+const webSearch = webSearchConfig.enabled ? new TavilyWebSearch(webSearchConfig) : null;
 const room = new ConversationRoom({
   agentA: getAgentConfig('a'),
   agentB: getAgentConfig('b'),
