@@ -1,3 +1,5 @@
+import './history-resume-ui.js';
+
 const statusNode = document.getElementById('researchStatus');
 
 if (statusNode) {
