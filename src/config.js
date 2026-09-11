@@ -65,20 +65,28 @@ export function getWebSearchConfig() {
 }
 
 export function getImageGenConfig() {
+  const provider = String(process.env.IMAGE_GEN_PROVIDER || 'openai-compatible').trim().toLowerCase();
   const apiKey = String(process.env.IMAGE_GEN_API_KEY || '').trim();
-  const model = String(process.env.IMAGE_GEN_MODEL || '').trim();
   const baseUrl = cleanBaseUrl(process.env.IMAGE_GEN_BASE_URL || '');
   const endpoint = String(process.env.IMAGE_GEN_ENDPOINT || '').trim();
-  const configured = Boolean(apiKey && model && (baseUrl || endpoint));
+  const cloudflareAccountId = String(process.env.CLOUDFLARE_ACCOUNT_ID || '').trim();
+  const cloudflareApiToken = String(process.env.CLOUDFLARE_API_TOKEN || '').trim();
+  const requestedModel = String(process.env.IMAGE_GEN_MODEL || '').trim();
+  const model = requestedModel || (provider === 'cloudflare' ? '@cf/black-forest-labs/flux-1-schnell' : '');
+  const configured = provider === 'cloudflare'
+    ? Boolean(cloudflareAccountId && cloudflareApiToken && model)
+    : Boolean(apiKey && model && (baseUrl || endpoint));
   const enabled = boolFromEnv('IMAGE_GEN_ENABLED', configured) && configured;
   return {
-    provider: 'openai-compatible',
+    provider,
     enabled,
     configured,
     apiKey,
     model,
     baseUrl,
     endpoint,
+    cloudflareAccountId,
+    cloudflareApiToken,
     size: String(process.env.IMAGE_GEN_SIZE || '1024x1024').trim(),
     timeoutMs: Math.max(5000, intFromEnv('IMAGE_GEN_TIMEOUT_MS', 120000)),
     maxBytes: Math.max(1024 * 1024, intFromEnv('IMAGE_GEN_MAX_BYTES', 25 * 1024 * 1024)),
