@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildWebResearchContext, decideWebResearch, parseResearchPlan } from '../src/research.js';
+import { buildWebResearchContext, decideWebResearch, getForcedResearchPlan, parseResearchPlan } from '../src/research.js';
 import { ConversationRoom } from '../src/orchestrator.js';
 
 test('research plan parser accepts JSON and fails closed on malformed output', () => {
@@ -13,26 +13,62 @@ test('research plan parser accepts JSON and fails closed on malformed output', (
   assert.equal(parseResearchPlan('not json').search, false);
 });
 
-test('research planner uses a compact hidden model call', async () => {
+test('realtime user intent forces web search before planner can decline it', async () => {
+  const provider = {
+    async streamChat() {
+      throw new Error('planner must not be called for deterministic realtime intents');
+    },
+  };
+  const history = [{ speaker: 'user', name: 'Bạn', text: 'Tìm thời tiết hôm nay ở Thành phố Hồ Chí Minh' }];
+  const forced = getForcedResearchPlan('Chủ đề khác', history);
+  assert.equal(forced.search, true);
+  assert.equal(forced.freshness, 'pd');
+  assert.equal(forced.queries[0], history[0].text);
+
+  const plan = await decideWebResearch({ provider, topic: 'Chủ đề khác', history, agentName: 'Agent A' });
+  assert.equal(plan.search, true);
+  assert.equal(plan.forced, true);
+  assert.equal(plan.reason, 'deterministic-realtime-intent');
+  assert.equal(plan.usage, null);
+});
+
+test('weather topic also forces research when the room starts without transcript', async () => {
+  const provider = {
+    async streamChat() {
+      throw new Error('planner must not be called for deterministic weather topic');
+    },
+  };
+  const plan = await decideWebResearch({
+    provider,
+    topic: 'Thời tiết TP.HCM hôm nay thế nào?',
+    history: [],
+    agentName: 'Agent A',
+  });
+  assert.equal(plan.search, true);
+  assert.equal(plan.forced, true);
+  assert.equal(plan.freshness, 'pd');
+});
+
+test('research planner still handles ambiguous cases with a compact hidden model call', async () => {
   const calls = [];
   const provider = {
     async streamChat(options) {
       calls.push(options);
       return {
-        text: '{"search":true,"queries":["thời tiết TP.HCM hôm nay","dự báo mưa TP.HCM"],"freshness":"pd","reason":"dữ liệu hiện tại"}',
+        text: '{"search":true,"queries":["nghiên cứu công nghệ X","đánh giá độc lập công nghệ X"],"freshness":"","reason":"cần kiểm chứng"}',
         usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20, exact: true },
       };
     },
   };
   const plan = await decideWebResearch({
     provider,
-    topic: 'Thời tiết',
-    history: [{ speaker: 'user', name: 'Bạn', text: 'Thời tiết TP.HCM hôm nay thế nào?' }],
+    topic: 'Công nghệ X',
+    history: [{ speaker: 'user', name: 'Bạn', text: 'Công nghệ này có thực sự đáng tin không?' }],
     agentName: 'Agent A',
   });
   assert.equal(plan.search, true);
-  assert.equal(plan.freshness, 'pd');
   assert.equal(plan.queries.length, 2);
+  assert.equal(calls.length, 1);
   assert.equal(calls[0].temperature, 0);
   assert.equal(calls[0].maxOutputTokens, 220);
 });
