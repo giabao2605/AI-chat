@@ -146,19 +146,20 @@ export class OpenAICompatibleProvider {
     this.endpoint = chatEndpoint(baseUrl);
     this.apiKey = apiKey;
     this.model = model;
+    this.visionSupport = null;
   }
 
   async streamChat({ messages, temperature = 0.8, maxOutputTokens = 1200, signal, onDelta = () => {} }) {
     const providerMessages = normalizeMessagesForProvider(messages);
+    const multimodal = hasImageInput(providerMessages);
+    let visionFallback = multimodal && this.visionSupport === false;
     let body = {
       model: this.model,
-      messages: providerMessages,
+      messages: visionFallback ? toTextOnlyMessages(providerMessages) : providerMessages,
       stream: true,
       temperature,
       max_tokens: maxOutputTokens,
     };
-    const multimodal = hasImageInput(providerMessages);
-    let visionFallback = false;
 
     let response = await requestStream({
       endpoint: this.endpoint,
@@ -178,7 +179,7 @@ export class OpenAICompatibleProvider {
       });
     }
 
-    if (!response.ok && multimodal && [400, 404, 415, 422].includes(response.status)) {
+    if (!response.ok && multimodal && !visionFallback && [400, 404, 415, 422].includes(response.status)) {
       visionFallback = true;
       body = { ...body, messages: toTextOnlyMessages(providerMessages) };
       response = await requestStream({
@@ -188,6 +189,9 @@ export class OpenAICompatibleProvider {
         signal,
         includeUsage: false,
       });
+      if (response.ok) this.visionSupport = false;
+    } else if (response.ok && multimodal && !visionFallback) {
+      this.visionSupport = true;
     }
 
     if (!response.ok) {
