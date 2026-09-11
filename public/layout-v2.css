@@ -1,4 +1,7 @@
-/* Layout refinements for the desktop conversation workspace. */
+:root {
+  --app-gutter: clamp(8px, .8vw, 14px);
+  --control-width: clamp(330px, 21vw, 390px);
+}
 
 @media (min-width: 901px) {
   html,
@@ -12,9 +15,11 @@
   }
 
   .app-shell {
+    width: 100vw;
+    max-width: none;
     height: 100dvh;
     min-height: 0;
-    padding: 16px 0;
+    padding: 8px var(--app-gutter) 10px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -22,25 +27,51 @@
 
   .topbar {
     flex: 0 0 auto;
-    justify-content: flex-start;
-    align-items: flex-start;
-    margin-bottom: 12px;
+    min-height: 0;
+    margin-bottom: 6px;
+    gap: 12px;
+    align-items: center;
   }
 
   .topbar-right {
     order: -1;
-    align-items: flex-start;
+    flex: 1 1 auto;
+    min-width: 0;
     max-width: none;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
   }
 
   .compact-stats {
+    flex: 0 1 auto;
     justify-content: flex-start;
+    flex-wrap: nowrap;
+  }
+
+  .mini-stat {
+    min-width: 132px;
+    padding: 6px 10px;
+  }
+
+  .mini-stat strong {
+    font-size: 18px;
+  }
+
+  .room-mini {
+    min-width: 104px;
+  }
+
+  .status-line {
+    flex: 0 0 auto;
+    margin-left: auto;
   }
 
   .brand-block {
     flex: 0 0 auto;
-    margin-left: auto;
-    padding-top: 5px;
+    margin-left: 0;
+    padding: 0 2px 0 8px;
     text-align: right;
   }
 
@@ -48,13 +79,26 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
-    grid-template-columns: 370px minmax(0, 1fr);
+    grid-template-columns: var(--control-width) minmax(0, 1fr);
     grid-template-areas: "controls chat";
+    gap: 8px;
     align-items: stretch;
+    transition: grid-template-columns .18s ease, gap .18s ease;
+  }
+
+  .workspace.controls-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "chat";
+    gap: 0;
+  }
+
+  .workspace.controls-collapsed .control-panel {
+    display: none;
   }
 
   .control-panel {
     grid-area: controls;
+    width: 100%;
     height: 100%;
     min-height: 0;
     max-height: none;
@@ -65,7 +109,9 @@
 
   .chat-panel {
     grid-area: chat;
+    width: 100%;
     height: 100%;
+    min-width: 0;
     min-height: 0;
     overflow: hidden;
   }
@@ -76,8 +122,17 @@
     flex: 0 0 auto;
   }
 
+  .chat-toolbar {
+    padding: 10px 16px;
+  }
+
+  .chat-toolbar p {
+    margin-top: 0;
+  }
+
   .chat {
     flex: 1 1 auto;
+    min-width: 0;
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -91,10 +146,16 @@
     z-index: 2;
     box-shadow: 0 -12px 28px rgba(6, 8, 13, .2);
   }
+
+  .expand-control-button {
+    position: fixed;
+    left: var(--app-gutter);
+    top: 50%;
+    z-index: 12;
+    transform: translateY(-50%);
+  }
 }
 
-/* `app.js` scrolls to the bottom on each stream delta. Smooth scrolling there
-   restarts an animation for every chunk and creates visible jitter. */
 .chat {
   scroll-behavior: auto;
   overflow-anchor: none;
@@ -102,6 +163,49 @@
 
 .bubble.typing {
   contain: paint;
+  will-change: contents;
+}
+
+.panel-actions {
+  display: flex;
+  gap: 7px;
+}
+
+.expand-control-button {
+  border: 1px solid #344056;
+  border-radius: 0 11px 11px 0;
+  padding: 10px 10px 10px 8px;
+  background: rgba(18, 23, 32, .96);
+  color: #c9d4e6;
+  box-shadow: 12px 0 30px rgba(0, 0, 0, .24);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .02em;
+  cursor: pointer;
+}
+
+.expand-control-button span {
+  margin-left: 5px;
+  color: #7ea7ef;
+  font-size: 17px;
+  line-height: 0;
+  vertical-align: -1px;
+}
+
+.expand-control-button:hover {
+  border-color: #53698d;
+  background: #171e2a;
+}
+
+@media (max-width: 1180px) and (min-width: 901px) {
+  .brand-block {
+    display: none;
+  }
+
+  .mini-stat {
+    min-width: 118px;
+  }
 }
 
 @media (max-width: 900px) {
@@ -117,12 +221,15 @@
   }
 
   .app-shell {
+    width: min(100% - 14px, 1500px);
     height: auto;
     min-height: 100dvh;
+    padding-top: 8px;
     overflow: visible;
   }
 
   .topbar {
+    margin-bottom: 8px;
     align-items: flex-start;
   }
 
@@ -143,18 +250,33 @@
     overflow: visible;
   }
 
+  .workspace.controls-collapsed {
+    grid-template-areas: "chat";
+  }
+
+  .workspace.controls-collapsed .control-panel {
+    display: none;
+  }
+
   .control-panel {
     grid-area: controls;
   }
 
   .chat-panel {
     grid-area: chat;
-    height: min(760px, 78dvh);
+    height: min(780px, 82dvh);
     min-height: 560px;
     overflow: hidden;
   }
 
   .chat {
     min-height: 0;
+  }
+
+  .expand-control-button {
+    position: fixed;
+    left: 0;
+    top: 88px;
+    z-index: 12;
   }
 }
