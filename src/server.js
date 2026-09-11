@@ -3,8 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getAgentConfig, getImageGenConfig, getPublicConfig, getServerConfig, getWebSearchConfig } from './config.js';
+import { getAgentConfig, getImageGenConfig, getImageInputConfig, getPublicConfig, getServerConfig, getWebSearchConfig } from './config.js';
 import { CloudflareImageTool } from './cloudflare-image-tool.js';
+import { createImageContextResolver } from './image-context.js';
 import { OpenAICompatibleImageTool } from './image-tool.js';
 import { ResumableConversationRoom } from './resumable-room.js';
 import { TavilyWebSearch } from './web-search.js';
@@ -15,6 +16,7 @@ const serverConfig = getServerConfig();
 const webSearchConfig = getWebSearchConfig();
 const webSearch = webSearchConfig.enabled ? new TavilyWebSearch(webSearchConfig) : null;
 const imageGenConfig = getImageGenConfig();
+const imageInputConfig = getImageInputConfig();
 
 function createImageTool(config) {
   if (!config.enabled) return null;
@@ -42,11 +44,19 @@ function createImageTool(config) {
 }
 
 const imageTool = createImageTool(imageGenConfig);
+const imageContextResolver = imageInputConfig.enabled
+  ? createImageContextResolver({
+    publicDir,
+    maxImages: imageInputConfig.maxImages,
+    maxBytes: imageInputConfig.maxBytes,
+  })
+  : null;
 const room = new ResumableConversationRoom({
   agentA: getAgentConfig('a'),
   agentB: getAgentConfig('b'),
   hardTurnLimit: serverConfig.hardTurnLimit,
   webSearch,
+  imageContextResolver,
 });
 
 const clients = new Set();
@@ -131,6 +141,7 @@ async function handleApi(req, res, pathname) {
     webSearch: Boolean(webSearch),
     imageGen: Boolean(imageTool),
     imageProvider: imageTool ? imageGenConfig.provider : null,
+    imageInput: Boolean(imageContextResolver),
   });
   if (req.method === 'GET' && pathname === '/api/config') return json(res, 200, getPublicConfig());
   if (req.method === 'GET' && pathname === '/api/state') return json(res, 200, room.snapshot());
@@ -250,4 +261,5 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   console.log('API keys stay server-side. Configure them in .env; never commit that file.');
   console.log(`Web search: ${webSearch ? `enabled (${webSearchConfig.provider})` : 'disabled'}.`);
   console.log(`Image generation: ${imageTool ? `enabled (${imageGenConfig.provider}: ${imageGenConfig.model})` : 'disabled'}.`);
+  console.log(`Model image input: ${imageContextResolver ? `enabled (latest ${imageInputConfig.maxImages} image${imageInputConfig.maxImages === 1 ? '' : 's'})` : 'disabled'}.`);
 });
