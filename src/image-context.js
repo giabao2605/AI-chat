@@ -37,7 +37,7 @@ export function createImageContextResolver({ publicDir, maxImages = 1, maxBytes 
   const imageLimit = Math.max(0, Number(maxImages) || 0);
   const byteLimit = Math.max(1024 * 1024, Number(maxBytes) || 8 * 1024 * 1024);
 
-  return async function resolveImageContext(history = []) {
+  return async function resolveImageContext(history = [], { afterIndex = -1 } = {}) {
     if (!imageLimit || !Array.isArray(history) || !history.length) return history;
     const cloned = history.map((item) => ({
       ...item,
@@ -46,8 +46,13 @@ export function createImageContextResolver({ publicDir, maxImages = 1, maxBytes 
         : item?.attachments,
     }));
 
+    const numericAfterIndex = Number(afterIndex);
+    const startIndex = Number.isFinite(numericAfterIndex)
+      ? Math.max(0, Math.min(cloned.length, Math.floor(numericAfterIndex) + 1))
+      : 0;
+
     let remaining = imageLimit;
-    for (let i = cloned.length - 1; i >= 0 && remaining > 0; i -= 1) {
+    for (let i = cloned.length - 1; i >= startIndex && remaining > 0; i -= 1) {
       const item = cloned[i];
       if (!Array.isArray(item.attachments)) continue;
       for (let j = item.attachments.length - 1; j >= 0 && remaining > 0; j -= 1) {
