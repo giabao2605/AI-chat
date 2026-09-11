@@ -73,9 +73,10 @@
 
         <section class="control-section" aria-labelledby="sessionSectionLabel">
           <div id="sessionSectionLabel" class="section-kicker">Phiên</div>
+          <label class="field"><span>Kiểu hội thoại</span><select id="conversationMode"><option value="turns">Theo lượt</option><option value="parallel">Tự do / song song</option></select><small>Theo lượt: A → B. Song song: cả hai có thể trả lời cùng lúc và tự bắt nhịp theo tin mới.</small></label>
           <label class="field"><span>Chế độ chủ đề</span><select id="topicMode"><option value="manual">Tôi chọn chủ đề</option><option value="auto">AI tự chọn chủ đề</option></select></label>
           <label id="topicField" class="field"><span>Chủ đề</span><textarea id="topic" rows="3" placeholder="Ví dụ: Nếu hai AI phải cùng thiết kế một thành phố trên Sao Hỏa..."></textarea></label>
-          <div class="two-cols"><label class="field"><span>Số lượt</span><input id="maxTurns" type="number" min="1" max="200" value="20" /></label><label class="field"><span>AI mở lời</span><select id="startSpeaker"><option value="random">Ngẫu nhiên</option><option value="a">Agent A</option><option value="b">Agent B</option></select></label></div>
+          <div class="two-cols"><label class="field"><span>Số lượt</span><input id="maxTurns" type="number" min="1" max="200" value="20" /></label><label class="field"><span>AI ưu tiên mở lời</span><select id="startSpeaker"><option value="random">Ngẫu nhiên</option><option value="a">Agent A</option><option value="b">Agent B</option></select></label></div>
         </section>
 
         <section class="control-section" aria-labelledby="modelSectionLabel">
