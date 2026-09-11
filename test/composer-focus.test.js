@@ -14,6 +14,7 @@ test('composer focus helper is loaded after the main app', () => {
 
 test('composer regains focus once submit processing re-enables the input', () => {
   assert.match(focusSource, /form\.addEventListener\('submit'/);
+  assert.match(focusSource, /queueMicrotask\(focusWhenComposerReady\)/);
   assert.match(focusSource, /attributeFilter: \['disabled'\]/);
   assert.match(focusSource, /input\.focus\(\{ preventScroll: true \}\)/);
 });
