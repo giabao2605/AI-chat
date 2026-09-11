@@ -128,6 +128,42 @@ function extractDelta(payload) {
   return '';
 }
 
+function collectToolCallDeltas(payload, target) {
+  const chunks = payload?.choices?.[0]?.delta?.tool_calls;
+  if (!Array.isArray(chunks)) return;
+  for (const chunk of chunks) {
+    const index = Number.isInteger(chunk?.index) ? chunk.index : target.length;
+    if (!target[index]) {
+      target[index] = {
+        index,
+        id: '',
+        type: 'function',
+        function: { name: '', arguments: '' },
+      };
+    }
+    const call = target[index];
+    if (chunk?.id) call.id = String(chunk.id);
+    if (chunk?.type) call.type = String(chunk.type);
+    if (chunk?.function?.name) {
+      const nameChunk = String(chunk.function.name);
+      if (!call.function.name) call.function.name = nameChunk;
+      else if (call.function.name !== nameChunk && !call.function.name.endsWith(nameChunk)) call.function.name += nameChunk;
+    }
+    if (chunk?.function?.arguments) call.function.arguments += String(chunk.function.arguments);
+  }
+}
+
+export function normalizeToolCalls(toolCalls = []) {
+  return toolCalls.filter(Boolean).map((call, index) => ({
+    id: String(call.id || `tool_call_${index}`),
+    type: 'function',
+    function: {
+      name: String(call?.function?.name || '').trim(),
+      arguments: String(call?.function?.arguments || ''),
+    },
+  })).filter((call) => call.function.name);
+}
+
 async function requestStream({ endpoint, apiKey, body, signal, includeUsage }) {
   const payload = includeUsage ? { ...body, stream_options: { include_usage: true } } : body;
   return fetch(endpoint, {
@@ -147,20 +183,35 @@ export class OpenAICompatibleProvider {
     this.apiKey = apiKey;
     this.model = model;
     this.visionSupport = null;
+    this.toolSupport = null;
   }
 
-  async streamChat({ messages, temperature = 0.8, maxOutputTokens = 1200, signal, onDelta = () => {} }) {
+  async streamChat({
+    messages,
+    temperature = 0.8,
+    maxOutputTokens = 1200,
+    signal,
+    onDelta = () => {},
+    tools = [],
+    toolChoice = 'auto',
+  }) {
     const providerMessages = normalizeMessagesForProvider(messages);
     const multimodal = hasImageInput(providerMessages);
     let visionFallback = multimodal && this.visionSupport === false;
-    let body = {
+    const requestedTools = Array.isArray(tools) ? tools.filter(Boolean) : [];
+    let useTools = requestedTools.length > 0 && this.toolSupport !== false;
+    let toolFallback = requestedTools.length > 0 && this.toolSupport === false;
+
+    const makeBody = () => ({
       model: this.model,
       messages: visionFallback ? toTextOnlyMessages(providerMessages) : providerMessages,
       stream: true,
       temperature,
       max_tokens: maxOutputTokens,
-    };
+      ...(useTools ? { tools: requestedTools, tool_choice: toolChoice || 'auto' } : {}),
+    });
 
+    let body = makeBody();
     let response = await requestStream({
       endpoint: this.endpoint,
       apiKey: this.apiKey,
@@ -181,7 +232,7 @@ export class OpenAICompatibleProvider {
 
     if (!response.ok && multimodal && !visionFallback && [400, 404, 415, 422].includes(response.status)) {
       visionFallback = true;
-      body = { ...body, messages: toTextOnlyMessages(providerMessages) };
+      body = makeBody();
       response = await requestStream({
         endpoint: this.endpoint,
         apiKey: this.apiKey,
@@ -190,8 +241,20 @@ export class OpenAICompatibleProvider {
         includeUsage: false,
       });
       if (response.ok) this.visionSupport = false;
-    } else if (response.ok && multimodal && !visionFallback) {
-      this.visionSupport = true;
+    }
+
+    if (!response.ok && useTools && [400, 404, 415, 422].includes(response.status)) {
+      useTools = false;
+      toolFallback = true;
+      body = makeBody();
+      response = await requestStream({
+        endpoint: this.endpoint,
+        apiKey: this.apiKey,
+        body,
+        signal,
+        includeUsage: false,
+      });
+      if (response.ok) this.toolSupport = false;
     }
 
     if (!response.ok) {
@@ -199,6 +262,8 @@ export class OpenAICompatibleProvider {
       throw new Error(`Provider returned HTTP ${response.status}: ${errorText || response.statusText}`);
     }
 
+    if (multimodal && !visionFallback) this.visionSupport = true;
+    if (requestedTools.length > 0 && useTools) this.toolSupport = true;
     if (!response.body) throw new Error('Provider returned no response body.');
 
     const reader = response.body.getReader();
@@ -206,6 +271,7 @@ export class OpenAICompatibleProvider {
     let buffer = '';
     let fullText = '';
     let usage = null;
+    const toolCallChunks = [];
 
     const consumeLine = (line) => {
       const trimmed = line.trim();
@@ -219,6 +285,7 @@ export class OpenAICompatibleProvider {
         fullText += delta;
         onDelta(delta);
       }
+      collectToolCallDeltas(payload, toolCallChunks);
       const normalized = normalizeUsage(payload.usage);
       if (normalized) usage = normalized;
     };
@@ -236,9 +303,12 @@ export class OpenAICompatibleProvider {
 
     return {
       text: fullText.trim(),
+      toolCalls: normalizeToolCalls(toolCallChunks),
       usage: usage || estimateUsage(body.messages, fullText),
       visionFallback,
       visionAccepted: multimodal && !visionFallback,
+      toolFallback,
+      toolsAccepted: requestedTools.length > 0 && useTools,
     };
   }
 }

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getAgentConfig, getImageGenConfig, getImageInputConfig, getPublicConfig, getServerConfig, getWebSearchConfig } from './config.js';
+import { getAgentConfig, getAgentToolConfig, getImageGenConfig, getImageInputConfig, getPublicConfig, getServerConfig, getWebSearchConfig } from './config.js';
 import { CloudflareImageTool } from './cloudflare-image-tool.js';
 import { createImageContextResolver } from './image-context.js';
 import { OpenAICompatibleImageTool } from './image-tool.js';
@@ -17,6 +17,7 @@ const webSearchConfig = getWebSearchConfig();
 const webSearch = webSearchConfig.enabled ? new TavilyWebSearch(webSearchConfig) : null;
 const imageGenConfig = getImageGenConfig();
 const imageInputConfig = getImageInputConfig();
+const agentToolConfig = getAgentToolConfig();
 
 function createImageTool(config) {
   if (!config.enabled) return null;
@@ -57,6 +58,8 @@ const room = new ResumableConversationRoom({
   hardTurnLimit: serverConfig.hardTurnLimit,
   webSearch,
   imageContextResolver,
+  imageTool: agentToolConfig.imageGenerationEnabled ? imageTool : null,
+  maxImageToolCallsPerTurn: agentToolConfig.maxImageCallsPerTurn,
 });
 
 const clients = new Set();
@@ -142,6 +145,7 @@ async function handleApi(req, res, pathname) {
     imageGen: Boolean(imageTool),
     imageProvider: imageTool ? imageGenConfig.provider : null,
     imageInput: Boolean(imageContextResolver),
+    agentImageTool: Boolean(imageTool && agentToolConfig.imageGenerationEnabled && agentToolConfig.maxImageCallsPerTurn > 0),
   });
   if (req.method === 'GET' && pathname === '/api/config') return json(res, 200, getPublicConfig());
   if (req.method === 'GET' && pathname === '/api/state') return json(res, 200, room.snapshot());
@@ -262,4 +266,5 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   console.log(`Web search: ${webSearch ? `enabled (${webSearchConfig.provider})` : 'disabled'}.`);
   console.log(`Image generation: ${imageTool ? `enabled (${imageGenConfig.provider}: ${imageGenConfig.model})` : 'disabled'}.`);
   console.log(`Model image input: ${imageContextResolver ? `enabled (latest ${imageInputConfig.maxImages} image${imageInputConfig.maxImages === 1 ? '' : 's'})` : 'disabled'}.`);
+  console.log(`Agent image tool: ${imageTool && agentToolConfig.imageGenerationEnabled && agentToolConfig.maxImageCallsPerTurn > 0 ? `enabled (max ${agentToolConfig.maxImageCallsPerTurn}/turn)` : 'disabled'}.`);
 });
