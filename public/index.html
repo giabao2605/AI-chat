@@ -10,38 +10,6 @@
 </head>
 <body>
   <div class="app-shell">
-    <header class="topbar">
-      <div class="brand-block">
-        <div class="eyebrow">AI CONVERSATION LAB</div>
-      </div>
-
-      <div class="topbar-right">
-        <div class="compact-stats" aria-label="Thống kê token">
-          <div class="mini-stat agent-a-mini" title="Token Agent A">
-            <span id="agentAName">Agent A</span>
-            <strong id="agentATotal">0</strong>
-            <small><span id="agentAModel">-</span> · In <b id="agentAInput">0</b> / Out <b id="agentAOutput">0</b></small>
-            <i id="agentAEstimate"></i>
-          </div>
-          <div class="mini-stat agent-b-mini" title="Token Agent B">
-            <span id="agentBName">Agent B</span>
-            <strong id="agentBTotal">0</strong>
-            <small><span id="agentBModel">-</span> · In <b id="agentBInput">0</b> / Out <b id="agentBOutput">0</b></small>
-            <i id="agentBEstimate"></i>
-          </div>
-          <div class="mini-stat room-mini" title="Token toàn phòng">
-            <span>Toàn phòng</span>
-            <strong id="combinedTotal">0</strong>
-            <small><span id="turnCounter">0 / 20</span> lượt</small>
-          </div>
-        </div>
-        <div class="status-line">
-          <div class="status-wrap"><span id="connectionDot" class="dot offline"></span><span id="connectionText">Đang kết nối</span><span id="roomStatus" class="status-pill">idle</span></div>
-          <button id="historyBtn" class="button ghost compact-button" type="button">Lịch sử <span id="historyCount" class="history-count">0</span></button>
-        </div>
-      </div>
-    </header>
-
     <button id="expandControlBtn" class="expand-control-button hidden" type="button" aria-expanded="false" aria-controls="controlPanel" title="Hiện Control Room">Điều khiển <span>›</span></button>
 
     <main id="workspace" class="workspace">
@@ -71,6 +39,34 @@
             <button id="resetBtn" class="icon-button" type="button" title="Reset phiên">↻</button>
           </div>
         </div>
+
+        <section class="control-monitor" aria-label="Trạng thái phòng và thống kê token">
+          <div class="status-line control-status-line">
+            <div class="status-wrap"><span id="connectionDot" class="dot offline"></span><span id="connectionText">Đang kết nối</span><span id="roomStatus" class="status-pill">idle</span></div>
+            <button id="historyBtn" class="button ghost compact-button" type="button">Lịch sử <span id="historyCount" class="history-count">0</span></button>
+          </div>
+
+          <div class="compact-stats control-stats" aria-label="Thống kê token">
+            <div class="mini-stat agent-a-mini" title="Token Agent A">
+              <span id="agentAName">Agent A</span>
+              <strong id="agentATotal">0</strong>
+              <small><span id="agentAModel">-</span> · In <b id="agentAInput">0</b> / Out <b id="agentAOutput">0</b></small>
+              <i id="agentAEstimate"></i>
+            </div>
+            <div class="mini-stat agent-b-mini" title="Token Agent B">
+              <span id="agentBName">Agent B</span>
+              <strong id="agentBTotal">0</strong>
+              <small><span id="agentBModel">-</span> · In <b id="agentBInput">0</b> / Out <b id="agentBOutput">0</b></small>
+              <i id="agentBEstimate"></i>
+            </div>
+            <div class="mini-stat room-mini" title="Token toàn phòng">
+              <span>Toàn phòng</span>
+              <strong id="combinedTotal">0</strong>
+              <small><span id="turnCounter">0 / 20</span> lượt</small>
+            </div>
+          </div>
+        </section>
+
         <label class="field"><span>Chế độ chủ đề</span><select id="topicMode"><option value="manual">Tôi chọn chủ đề</option><option value="auto">AI tự chọn chủ đề</option></select></label>
         <label id="topicField" class="field"><span>Chủ đề</span><textarea id="topic" rows="3" placeholder="Ví dụ: Nếu hai AI phải cùng thiết kế một thành phố trên Sao Hỏa..."></textarea></label>
         <div class="two-cols"><label class="field"><span>Số lượt</span><input id="maxTurns" type="number" min="1" max="200" value="20" /></label><label class="field"><span>AI mở lời</span><select id="startSpeaker"><option value="random">Ngẫu nhiên</option><option value="a">Agent A</option><option value="b">Agent B</option></select></label></div>
