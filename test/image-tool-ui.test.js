@@ -23,3 +23,11 @@ test('generated images are restricted to local generated URLs and rendered as im
   assert.match(cssSource, /\.chat-generated-image/);
   assert.match(cssSource, /\.tool-command-menu/);
 });
+
+test('live autonomous image messages retry decoration until state history is persisted', () => {
+  assert.match(uiSource, /function scheduleArticleDecoration\(article, attempt = 0\)/);
+  assert.match(uiSource, /if \(!entry\) return false;/);
+  assert.match(uiSource, /attempt < 16/);
+  assert.match(uiSource, /scheduleArticleDecoration\(node\)/);
+  assert.match(uiSource, /scheduleArticleDecoration\(article\)/);
+});
