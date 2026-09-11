@@ -1,0 +1,160 @@
+/* Layout refinements for the desktop conversation workspace. */
+
+@media (min-width: 901px) {
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    height: 100dvh;
+  }
+
+  .app-shell {
+    height: 100dvh;
+    min-height: 0;
+    padding: 16px 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .topbar {
+    flex: 0 0 auto;
+    justify-content: flex-start;
+    align-items: flex-start;
+    margin-bottom: 12px;
+  }
+
+  .topbar-right {
+    order: -1;
+    align-items: flex-start;
+    max-width: none;
+  }
+
+  .compact-stats {
+    justify-content: flex-start;
+  }
+
+  .brand-block {
+    flex: 0 0 auto;
+    margin-left: auto;
+    padding-top: 5px;
+    text-align: right;
+  }
+
+  .workspace {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    grid-template-columns: 370px minmax(0, 1fr);
+    grid-template-areas: "controls chat";
+    align-items: stretch;
+  }
+
+  .control-panel {
+    grid-area: controls;
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .chat-panel {
+    grid-area: chat;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .chat-toolbar,
+  .history-view-banner,
+  .composer {
+    flex: 0 0 auto;
+  }
+
+  .chat {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    scroll-behavior: auto;
+  }
+
+  .composer {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    box-shadow: 0 -12px 28px rgba(6, 8, 13, .2);
+  }
+}
+
+/* `app.js` scrolls to the bottom on each stream delta. Smooth scrolling there
+   restarts an animation for every chunk and creates visible jitter. */
+.chat {
+  scroll-behavior: auto;
+  overflow-anchor: none;
+}
+
+.bubble.typing {
+  contain: paint;
+}
+
+@media (max-width: 900px) {
+  html,
+  body {
+    height: auto;
+    min-height: 100%;
+    overflow: auto;
+  }
+
+  body {
+    min-height: 100dvh;
+  }
+
+  .app-shell {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .topbar {
+    align-items: flex-start;
+  }
+
+  .topbar-right {
+    order: -1;
+    align-items: stretch;
+  }
+
+  .brand-block {
+    margin-left: 0;
+    text-align: left;
+  }
+
+  .workspace {
+    grid-template-areas:
+      "controls"
+      "chat";
+    overflow: visible;
+  }
+
+  .control-panel {
+    grid-area: controls;
+  }
+
+  .chat-panel {
+    grid-area: chat;
+    height: min(760px, 78dvh);
+    min-height: 560px;
+    overflow: hidden;
+  }
+
+  .chat {
+    min-height: 0;
+  }
+}
