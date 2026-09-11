@@ -28,7 +28,7 @@ test('realtime user intent forces web search before planner can decline it', asy
   const plan = await decideWebResearch({ provider, topic: 'Chủ đề khác', history, agentName: 'Agent A' });
   assert.equal(plan.search, true);
   assert.equal(plan.forced, true);
-  assert.equal(plan.reason, 'deterministic-explicit-search');
+  assert.equal(plan.reason, 'deterministic-realtime-intent');
   assert.equal(plan.usage, null);
 });
 
