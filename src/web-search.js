@@ -197,11 +197,26 @@ export class TavilyWebSearch {
 
   async searchMany({ queries = [], freshness = '', signal } = {}) {
     const cleaned = [...new Set(queries.map((q) => String(q || '').trim()).filter(Boolean))].slice(0, this.maxQueries);
-    const all = [];
-    for (const query of cleaned) {
-      const rows = await this.searchOne(query, { freshness, signal });
-      all.push(...rows);
+    if (!cleaned.length) {
+      return { provider: 'tavily', queries: [], freshness: freshness || null, sources: [] };
     }
+
+    const settled = await Promise.allSettled(
+      cleaned.map((query) => this.searchOne(query, { freshness, signal })),
+    );
+
+    if (signal?.aborted) throw signal.reason || new DOMException('Aborted', 'AbortError');
+
+    const all = [];
+    const errors = [];
+    for (const result of settled) {
+      if (result.status === 'fulfilled') all.push(...result.value);
+      else errors.push(result.reason);
+    }
+
+    // Partial search results are still useful. Only fail the whole research step when every query failed.
+    if (!all.length && errors.length === settled.length) throw errors[0];
+
     return {
       provider: 'tavily',
       queries: cleaned,
