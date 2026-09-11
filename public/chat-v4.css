@@ -28,15 +28,10 @@ select {
   align-items: flex-start;
 }
 
-.message.a {
+.message.a,
+.message.b {
   margin-left: 0;
   margin-right: auto;
-}
-
-.message.b {
-  flex-direction: row-reverse;
-  margin-left: auto;
-  margin-right: 0;
 }
 
 .message.a .message-body,
@@ -44,6 +39,7 @@ select {
   width: min(78%, 980px);
   max-width: none;
   padding: 4px 0 4px 14px;
+  text-align: left;
 }
 
 .message.a .message-body {
@@ -51,13 +47,12 @@ select {
 }
 
 .message.b .message-body {
-  padding: 4px 14px 4px 0;
-  border-right: 2px solid rgba(178, 140, 255, .22);
-  text-align: left;
+  border-left: 2px solid rgba(178, 140, 255, .22);
 }
 
+.message.a .message-meta,
 .message.b .message-meta {
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .message-meta {

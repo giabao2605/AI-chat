@@ -42,10 +42,12 @@ test('visual polish stylesheet and control hierarchy are present', () => {
   assert.match(visual, /\.control-footer[\s\S]*position:\s*sticky/);
 });
 
-test('chat v4 uses Apple system typography and wider opposing AI lanes', () => {
+test('chat v4 uses Apple system typography and keeps both AI lanes on the left', () => {
   assert.match(index, /href="\/chat-v4\.css"/);
   assert.match(chatV4, /font-family:\s*-apple-system,\s*BlinkMacSystemFont/);
-  assert.match(chatV4, /\.message\.b\s*\{[\s\S]*flex-direction:\s*row-reverse/);
+  assert.match(chatV4, /\.message\.a,\s*\n\.message\.b\s*\{[\s\S]*margin-left:\s*0;[\s\S]*margin-right:\s*auto;/);
+  assert.doesNotMatch(chatV4, /flex-direction:\s*row-reverse/);
+  assert.match(chatV4, /\.message\.b \.message-body\s*\{[\s\S]*border-left:\s*2px solid rgba\(178, 140, 255, \.22\)/);
   assert.match(chatV4, /\.message\.a \.message-body,[\s\S]*\.message\.b \.message-body[\s\S]*width:\s*min\(78%,\s*980px\)/);
   assert.match(chatV4, /\.message\.a \.bubble,[\s\S]*\.message\.b \.bubble[\s\S]*font-size:\s*15\.75px/);
   assert.match(chatV4, /@media \(min-width:\s*1500px\)[\s\S]*font-size:\s*16px/);
