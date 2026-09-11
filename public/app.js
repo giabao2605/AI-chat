@@ -2,7 +2,7 @@ import { HISTORY_LIMIT, HISTORY_STORAGE_KEY, parseStoredHistory, removeHistoryRe
 
 const $ = (id) => document.getElementById(id);
 const els = {
-  chat: $('chat'), connectionDot: $('connectionDot'), connectionText: $('connectionText'), roomStatus: $('roomStatus'),
+  workspace: $('workspace'), chat: $('chat'), connectionDot: $('connectionDot'), connectionText: $('connectionText'), roomStatus: $('roomStatus'),
   agentAName: $('agentAName'), agentBName: $('agentBName'), agentAModel: $('agentAModel'), agentBModel: $('agentBModel'),
   agentATotal: $('agentATotal'), agentBTotal: $('agentBTotal'), agentAInput: $('agentAInput'), agentBInput: $('agentBInput'), agentAOutput: $('agentAOutput'), agentBOutput: $('agentBOutput'),
   agentAEstimate: $('agentAEstimate'), agentBEstimate: $('agentBEstimate'), combinedTotal: $('combinedTotal'), turnCounter: $('turnCounter'), topicPreview: $('topicPreview'),
@@ -12,14 +12,17 @@ const els = {
   userForm: $('userForm'), userInput: $('userInput'), sendBtn: $('sendBtn'), toast: $('toast'),
   historyBtn: $('historyBtn'), historyCount: $('historyCount'), historyDrawer: $('historyDrawer'), historyBackdrop: $('historyBackdrop'), closeHistoryBtn: $('closeHistoryBtn'), historyList: $('historyList'), clearHistoryBtn: $('clearHistoryBtn'),
   historyViewBanner: $('historyViewBanner'), historyViewTopic: $('historyViewTopic'), returnLiveBtn: $('returnLiveBtn'),
+  collapseControlBtn: $('collapseControlBtn'), expandControlBtn: $('expandControlBtn'),
 };
 
+const CONTROL_COLLAPSED_KEY = 'ai-chat-control-collapsed-v1';
 let config;
 let state;
 let eventSource;
 let toastTimer;
 let viewingHistoryId = null;
 let savedSessions = parseStoredHistory(localStorage.getItem(HISTORY_STORAGE_KEY));
+let followTail = true;
 const streamNodes = new Map();
 
 function formatNumber(value) { return new Intl.NumberFormat('vi-VN').format(Number(value || 0)); }
@@ -65,10 +68,20 @@ function messageNode(message, streaming = false) {
   bubble.textContent = message.text || '';
   body.append(meta, bubble);
   wrapper.append(avatar, body);
-  return { wrapper, bubble, usage };
+  return { wrapper, bubble, usage, pending: '', rendered: message.text || '', frame: 0, finalPayload: null };
 }
 
-function clearChat() { els.chat.innerHTML = ''; streamNodes.clear(); }
+function cancelStreamFrame(node) {
+  if (node?.frame) cancelAnimationFrame(node.frame);
+  if (node) node.frame = 0;
+}
+
+function clearChat() {
+  for (const node of streamNodes.values()) cancelStreamFrame(node);
+  els.chat.innerHTML = '';
+  streamNodes.clear();
+}
+
 function renderTranscript(messages = []) {
   clearChat();
   if (!messages.length) {
@@ -76,13 +89,77 @@ function renderTranscript(messages = []) {
     empty.className = 'empty-state';
     empty.innerHTML = '<div class="empty-orbit">A ↔ B</div><h3>Chưa có drama trí tuệ nhân tạo.</h3><p>Chọn chủ đề hoặc để AI tự chọn, rồi bắt đầu. Bạn có thể ngồi xem hoặc chen ngang bất cứ lúc nào.</p>';
     els.chat.append(empty);
+    followTail = true;
     return;
   }
   for (const message of messages) els.chat.append(messageNode(message).wrapper);
-  scrollChat();
+  followTail = true;
+  requestAnimationFrame(() => scrollChat(true));
 }
+
 function removeEmpty() { els.chat.querySelector('.empty-state')?.remove(); }
-function scrollChat() { els.chat.scrollTop = els.chat.scrollHeight; }
+function distanceFromBottom() { return els.chat.scrollHeight - els.chat.scrollTop - els.chat.clientHeight; }
+function scrollChat(force = false) {
+  if (force || followTail) els.chat.scrollTop = els.chat.scrollHeight;
+}
+
+function finalizeStream(messageId) {
+  const node = streamNodes.get(messageId);
+  if (!node || !node.finalPayload || node.pending.length) return;
+  const data = node.finalPayload;
+  node.bubble.classList.remove('typing');
+  if (node.rendered !== data.text) {
+    node.rendered = data.text || node.rendered;
+    node.bubble.textContent = node.rendered;
+  }
+  if (data.usage) node.usage.textContent = `${formatNumber(data.usage.totalTokens)} token${data.usage.exact === false ? ' ~' : ''}`;
+  streamNodes.delete(messageId);
+  if (followTail) scrollChat(true);
+}
+
+function flushStream(messageId) {
+  const node = streamNodes.get(messageId);
+  if (!node) return;
+  node.frame = 0;
+
+  if (node.pending.length) {
+    const backlog = node.pending.length;
+    const chunkSize = backlog > 160 ? Math.min(64, Math.ceil(backlog * 0.32))
+      : backlog > 40 ? Math.min(28, Math.ceil(backlog * 0.38))
+        : Math.max(1, Math.min(12, Math.ceil(backlog * 0.5)));
+    node.rendered += node.pending.slice(0, chunkSize);
+    node.pending = node.pending.slice(chunkSize);
+    node.bubble.textContent = node.rendered;
+    if (followTail) scrollChat(true);
+  }
+
+  if (node.pending.length) {
+    node.frame = requestAnimationFrame(() => flushStream(messageId));
+  } else if (node.finalPayload) {
+    finalizeStream(messageId);
+  }
+}
+
+function queueStreamDelta(messageId, delta) {
+  const node = streamNodes.get(messageId);
+  if (!node || !delta) return;
+  node.pending += delta;
+  if (!node.frame) node.frame = requestAnimationFrame(() => flushStream(messageId));
+}
+
+function completeStream(messageId, payload) {
+  const node = streamNodes.get(messageId);
+  if (!node) return false;
+  node.finalPayload = payload;
+  const knownText = node.rendered + node.pending;
+  if (payload.text && payload.text !== knownText) {
+    if (payload.text.startsWith(knownText)) node.pending += payload.text.slice(knownText.length);
+    else if (!node.rendered) node.pending = payload.text;
+  }
+  if (node.pending.length && !node.frame) node.frame = requestAnimationFrame(() => flushStream(messageId));
+  if (!node.pending.length) finalizeStream(messageId);
+  return true;
+}
 
 function renderStats(stats = {}, turn = state?.turn || 0, maxTurns = state?.maxTurns || 20) {
   const a = stats.a || {};
@@ -225,10 +302,10 @@ function applyState(next, { history = false } = {}) {
   els.startBtn.disabled = active;
   els.stopBtn.disabled = !active;
   els.pauseBtn.disabled = !running && !paused;
-  els.pauseBtn.textContent = paused ? 'Tiếp tục' : (next.status === 'pausing' ? 'Đ�ng tạm dừng…' : 'Tạm dừng');
+  els.pauseBtn.textContent = paused ? 'Tiếp tục' : (next.status === 'pausing' ? 'Đang tạm dừng…' : 'Tạm dừng');
   els.liveHint.textContent = next.currentSpeaker
-    ? `${config?.agents?.[next.currentSpeaker]?.name || next.currentSpeaker} đ�ng trả lời...`
-    : ({ idle: 'Chưa bắt đầu phiên.', starting: 'Đang chuần bị phiên...', paused: 'Đã tạm dừng.', pausing: 'Sẽ tạm dừng sau lượt hiện tại.', stopped: 'Phiên đã dừng.', completed: 'Phiên đã hoàn thành.', error: 'Phiên gặp lỗi.' }[next.status] || 'Sẵn sàng.');
+    ? `${config?.agents?.[next.currentSpeaker]?.name || next.currentSpeaker} đang trả lời...`
+    : ({ idle: 'Chưa bắt đầu phiên.', starting: 'Đang chuẩn bị phiên...', paused: 'Đã tạm dừng.', pausing: 'Sẽ tạm dừng sau lượt hiện tại.', stopped: 'Phiên đã dừng.', completed: 'Phiên đã hoàn thành.', error: 'Phiên gặp lỗi.' }[next.status] || 'Sẵn sàng.');
   updateComposerState();
   if (!viewingHistoryId) {
     els.topicPreview.textContent = next.topic || 'Chưa có chủ đề.';
@@ -243,6 +320,15 @@ function setTopicMode() {
   if (!auto) els.autoStart.checked = false;
   els.autoStart.disabled = !auto;
   localStorage.setItem('ai-chat-auto-start', auto && els.autoStart.checked ? '1' : '0');
+}
+
+function setControlCollapsed(collapsed, { persist = true } = {}) {
+  els.workspace.classList.toggle('controls-collapsed', collapsed);
+  els.expandControlBtn.classList.toggle('hidden', !collapsed);
+  els.collapseControlBtn.setAttribute('aria-expanded', String(!collapsed));
+  els.expandControlBtn.setAttribute('aria-expanded', String(!collapsed));
+  if (persist) localStorage.setItem(CONTROL_COLLAPSED_KEY, collapsed ? '1' : '0');
+  requestAnimationFrame(() => { if (followTail) scrollChat(true); });
 }
 
 async function load() {
@@ -292,19 +378,17 @@ function connectEvents() {
     const node = messageNode({ ...data, text: '' }, true);
     streamNodes.set(data.id, node);
     els.chat.append(node.wrapper);
-    scrollChat();
+    if (followTail) requestAnimationFrame(() => scrollChat(true));
   });
   eventSource.addEventListener('message:delta', (event) => {
     if (viewingHistoryId) return;
     const data = JSON.parse(event.data);
-    const node = streamNodes.get(data.id);
-    if (!node) return;
-    node.bubble.textContent += data.delta;
-    scrollChat();
+    queueStreamDelta(data.id, data.delta);
   });
   eventSource.addEventListener('message:cancelled', (event) => {
     const data = JSON.parse(event.data);
     const existing = streamNodes.get(data.id);
+    cancelStreamFrame(existing);
     if (existing) existing.wrapper.remove();
     streamNodes.delete(data.id);
   });
@@ -312,9 +396,11 @@ function connectEvents() {
     const data = JSON.parse(event.data);
     const existing = streamNodes.get(data.id);
     if (existing) {
+      cancelStreamFrame(existing);
+      const partial = existing.rendered + existing.pending;
       existing.bubble.classList.remove('typing');
       existing.bubble.classList.add('failed');
-      existing.bubble.textContent += existing.bubble.textContent ? '\n\n[Lượt trả lời bị gián đoạn]' : '[Lượt trả lời bị lỗi]';
+      existing.bubble.textContent = partial ? `${partial}\n\n[Lượt trả lời bị gián đoạn]` : '[Lượt trả lời bị lỗi]';
       streamNodes.delete(data.id);
     }
     toast(data.message || 'AI trả lời thất bại.');
@@ -323,16 +409,10 @@ function connectEvents() {
     if (viewingHistoryId) return;
     const data = JSON.parse(event.data);
     removeEmpty();
-    const existing = streamNodes.get(data.id);
-    if (existing) {
-      existing.bubble.classList.remove('typing');
-      existing.bubble.textContent = data.text;
-      if (data.usage) existing.usage.textContent = `${formatNumber(data.usage.totalTokens)} token${data.usage.exact === false ? ' ~' : ''}`;
-      streamNodes.delete(data.id);
-    } else if (!els.chat.querySelector(`[data-message-id="${CSS.escape(data.id)}"]`)) {
+    if (!completeStream(data.id, data) && !els.chat.querySelector(`[data-message-id="${CSS.escape(data.id)}"]`)) {
       els.chat.append(messageNode(data).wrapper);
+      if (followTail) requestAnimationFrame(() => scrollChat(true));
     }
-    scrollChat();
   });
 }
 
@@ -344,6 +424,7 @@ async function startConversation() {
     if (viewingHistoryId) returnToLive();
     const payload = { topicMode, topic, maxTurns: Number(els.maxTurns.value), startSpeaker: els.startSpeaker.value, temperature: Number(els.temperature.value), maxOutputTokens: Number(els.maxOutputTokens.value), sharedPrompt: els.sharedPrompt.value, personaA: els.personaA.value, personaB: els.personaB.value };
     await api('/api/start', { method: 'POST', body: JSON.stringify(payload) });
+    if (topicMode === 'manual') els.topic.value = '';
   } catch (error) { toast(error.message); }
 }
 
@@ -374,8 +455,12 @@ els.clearHistoryBtn.addEventListener('click', () => {
   renderHistoryList();
   toast('Đã xóa lịch sử trò chuyện.');
 });
+els.collapseControlBtn.addEventListener('click', () => setControlCollapsed(true));
+els.expandControlBtn.addEventListener('click', () => setControlCollapsed(false));
+els.chat.addEventListener('scroll', () => { followTail = distanceFromBottom() < 120; }, { passive: true });
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeHistoryDrawer(); });
 
 setTopicMode();
+setControlCollapsed(localStorage.getItem(CONTROL_COLLAPSED_KEY) === '1', { persist: false });
 renderHistoryList();
 load().catch((error) => toast(error.message));

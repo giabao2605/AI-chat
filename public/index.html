@@ -42,7 +42,9 @@
       </div>
     </header>
 
-    <main class="workspace">
+    <button id="expandControlBtn" class="expand-control-button hidden" type="button" aria-expanded="false" aria-controls="controlPanel" title="Hiện Control Room">Điều khiển <span>›</span></button>
+
+    <main id="workspace" class="workspace">
       <section class="chat-panel">
         <div class="chat-toolbar">
           <div>
@@ -61,8 +63,14 @@
         <form id="userForm" class="composer"><input id="userInput" type="text" maxlength="20000" placeholder="Chen vào cuộc trò chuyện..." autocomplete="off" disabled /><button id="sendBtn" class="button primary" type="submit" disabled>Gửi</button></form>
       </section>
 
-      <aside class="control-panel">
-        <div class="panel-title"><div><div class="eyebrow">CONTROL ROOM</div><h2>Thiết lập</h2></div><button id="resetBtn" class="icon-button" title="Reset phiên">↻</button></div>
+      <aside id="controlPanel" class="control-panel">
+        <div class="panel-title">
+          <div><div class="eyebrow">CONTROL ROOM</div><h2>Thiết lập</h2></div>
+          <div class="panel-actions">
+            <button id="collapseControlBtn" class="icon-button" type="button" title="Thu gọn Control Room" aria-expanded="true" aria-controls="controlPanel">‹</button>
+            <button id="resetBtn" class="icon-button" type="button" title="Reset phiên">↻</button>
+          </div>
+        </div>
         <label class="field"><span>Chế độ chủ đề</span><select id="topicMode"><option value="manual">Tôi chọn chủ đề</option><option value="auto">AI tự chọn chủ đề</option></select></label>
         <label id="topicField" class="field"><span>Chủ đề</span><textarea id="topic" rows="3" placeholder="Ví dụ: Nếu hai AI phải cùng thiết kế một thành phố trên Sao Hỏa..."></textarea></label>
         <div class="two-cols"><label class="field"><span>Số lượt</span><input id="maxTurns" type="number" min="1" max="200" value="20" /></label><label class="field"><span>AI mở lời</span><select id="startSpeaker"><option value="random">Ngẫu nhiên</option><option value="a">Agent A</option><option value="b">Agent B</option></select></label></div>
