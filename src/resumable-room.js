@@ -41,13 +41,35 @@ function sanitizeSources(value) {
   })).filter((source) => source.url || source.title);
 }
 
+function sanitizeAttachments(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 4).map((attachment) => {
+    if (attachment?.type !== 'image') return null;
+    const url = safeText(attachment?.url, 2000);
+    if (!url.startsWith('/generated/')) return null;
+    return {
+      type: 'image',
+      url,
+      alt: safeText(attachment?.alt, 12000),
+      prompt: safeText(attachment?.prompt, 12000),
+      revisedPrompt: safeText(attachment?.revisedPrompt, 12000),
+      size: safeText(attachment?.size, 100),
+      model: safeText(attachment?.model, 500),
+    };
+  }).filter(Boolean);
+}
+
 function sanitizeHistory(history, agentConfigs) {
   if (!Array.isArray(history)) return [];
   return history.slice(-1000).map((item) => {
-    const speaker = ['a', 'b', 'user'].includes(item?.speaker) ? item.speaker : null;
+    const speaker = ['a', 'b', 'user', 'tool'].includes(item?.speaker) ? item.speaker : null;
     const text = safeText(item?.text, 100000);
     if (!speaker || !text) return null;
-    const fallbackName = speaker === 'user' ? 'Bạn' : agentConfigs[speaker]?.name || `Agent ${speaker.toUpperCase()}`;
+    const fallbackName = speaker === 'user'
+      ? 'Bạn'
+      : speaker === 'tool'
+        ? 'Image Generator'
+        : agentConfigs[speaker]?.name || `Agent ${speaker.toUpperCase()}`;
     return {
       id: safeText(item?.id, 200) || randomUUID(),
       speaker,
@@ -56,6 +78,7 @@ function sanitizeHistory(history, agentConfigs) {
       createdAt: safeText(item?.createdAt, 100) || new Date().toISOString(),
       usage: sanitizeUsage(item?.usage),
       sources: sanitizeSources(item?.sources),
+      attachments: sanitizeAttachments(item?.attachments),
     };
   }).filter(Boolean);
 }
@@ -130,6 +153,7 @@ export class ResumableConversationRoom extends ConversationRoom {
     this.abortController = null;
     this.endedBy = null;
     this.endReason = '';
+    this.visionFallbackWarned = { a: false, b: false };
     this.settings = {
       topicMode: 'manual',
       sharedPrompt: safeText(input.sharedPrompt, 30000) || DEFAULT_SHARED_PROMPT,

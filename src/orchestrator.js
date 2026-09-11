@@ -29,6 +29,28 @@ function isTerminalStatus(status) {
   return ['stopped', 'idle', 'error', 'completed'].includes(status);
 }
 
+function historyItemContent(item, agentId) {
+  const ownMessage = item.speaker === agentId;
+  const text = ownMessage ? item.text : `${item.name}: ${item.text}`;
+  if (ownMessage || !Array.isArray(item.attachments)) return text;
+
+  const images = item.attachments
+    .filter((attachment) => attachment?.type === 'image' && typeof attachment.dataUrl === 'string' && attachment.dataUrl.startsWith('data:image/'))
+    .map((attachment) => ({
+      type: 'image_url',
+      image_url: { url: attachment.dataUrl, detail: 'auto' },
+    }));
+
+  if (!images.length) return text;
+  return [
+    {
+      type: 'text',
+      text: `${text}\n\nHình ảnh đính kèm sau đây là ảnh thật trong cuộc trò chuyện. Hãy quan sát trực tiếp nội dung ảnh trước khi nhận xét; đừng nói rằng bạn không thấy ảnh nếu ảnh đã được đính kèm.`,
+    },
+    ...images,
+  ];
+}
+
 export function buildMessagesForAgent({ agentId, agentName, topic, history, sharedPrompt, personaPrompt }) {
   const system = `${sharedPrompt || DEFAULT_SHARED_PROMPT}\n\nTên hiển thị của bạn trong phòng: ${agentName}.\n${personaPrompt ? `\nVai trò/phong cách bổ sung của bạn:\n${personaPrompt}` : ''}`;
   const messages = [
@@ -38,9 +60,9 @@ export function buildMessagesForAgent({ agentId, agentName, topic, history, shar
 
   for (const item of history) {
     if (item.speaker === agentId) {
-      messages.push({ role: 'assistant', content: item.text });
+      messages.push({ role: 'assistant', content: historyItemContent(item, agentId) });
     } else {
-      messages.push({ role: 'user', content: `${item.name}: ${item.text}` });
+      messages.push({ role: 'user', content: historyItemContent(item, agentId) });
     }
   }
   return messages;
@@ -54,12 +76,13 @@ function blankStats() {
 }
 
 export class ConversationRoom extends EventEmitter {
-  constructor({ agentA, agentB, hardTurnLimit = 200, providerFactory, webSearch = null } = {}) {
+  constructor({ agentA, agentB, hardTurnLimit = 200, providerFactory, webSearch = null, imageContextResolver = null } = {}) {
     super();
     this.agentConfigs = { a: agentA, b: agentB };
     this.hardTurnLimit = hardTurnLimit;
     this.providerFactory = providerFactory || ((config) => new OpenAICompatibleProvider(config));
     this.webSearch = webSearch;
+    this.imageContextResolver = typeof imageContextResolver === 'function' ? imageContextResolver : null;
     this.providers = {};
     this.reset();
   }
@@ -78,6 +101,7 @@ export class ConversationRoom extends EventEmitter {
     this.abortController = null;
     this.endedBy = null;
     this.endReason = '';
+    this.visionFallbackWarned = { a: false, b: false };
     this.emitState();
   }
 
@@ -121,6 +145,7 @@ export class ConversationRoom extends EventEmitter {
     this.currentSpeaker = null;
     this.endedBy = null;
     this.endReason = '';
+    this.visionFallbackWarned = { a: false, b: false };
     this.maxTurns = Math.floor(clamp(input.maxTurns, 1, 100000, 20));
     if (this.hardTurnLimit > 0) this.maxTurns = Math.min(this.maxTurns, this.hardTurnLimit);
 
@@ -284,16 +309,27 @@ export class ConversationRoom extends EventEmitter {
     }
   }
 
+  async historyForModel() {
+    if (!this.imageContextResolver) return this.history;
+    try {
+      return await this.imageContextResolver(this.history);
+    } catch (error) {
+      this.emit('meta', { text: `Không thể nạp ảnh vào context AI: ${error?.message || String(error)}` });
+      return this.history;
+    }
+  }
+
   async runAgentTurn(agentId, activeRunId = this.runId) {
     const agent = this.agentConfigs[agentId];
     const messageId = randomUUID();
     this.currentSpeaker = agentId;
     this.abortController = new AbortController();
+    const historyForModel = await this.historyForModel();
     const messages = buildMessagesForAgent({
       agentId,
       agentName: agent.name,
       topic: this.topic,
-      history: this.history,
+      history: historyForModel,
       sharedPrompt: this.settings.sharedPrompt,
       personaPrompt: agentId === 'a' ? this.settings.personaA : this.settings.personaB,
     });
@@ -326,6 +362,11 @@ export class ConversationRoom extends EventEmitter {
         this.emit('message:failed', { id: messageId, speaker: agentId, message: error?.message || String(error) });
       }
       throw error;
+    }
+
+    if (result.visionFallback && !this.visionFallbackWarned[agentId]) {
+      this.visionFallbackWarned[agentId] = true;
+      this.emit('meta', { text: `${agent.name}: provider hiện không nhận image input theo schema OpenAI; đã fallback sang transcript text để phiên không bị lỗi.` });
     }
 
     if (activeRunId !== this.runId) return;
