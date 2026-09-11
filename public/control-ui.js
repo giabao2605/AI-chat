@@ -2,6 +2,7 @@ import { CONTROL_SETTINGS_STORAGE_KEY, createControlSettings, parseStoredControl
 
 const $ = (id) => document.getElementById(id);
 const fields = {
+  conversationMode: $('conversationMode'),
   maxTurns: $('maxTurns'),
   temperature: $('temperature'),
   maxOutputTokens: $('maxOutputTokens'),
@@ -10,6 +11,7 @@ const fields = {
 
 function current(savedAt = new Date().toISOString()) {
   return createControlSettings({
+    conversationMode: fields.conversationMode?.value,
     maxTurns: fields.maxTurns.value,
     temperature: fields.temperature.value,
     maxOutputTokens: fields.maxOutputTokens.value,
@@ -18,6 +20,7 @@ function current(savedAt = new Date().toISOString()) {
 }
 
 function apply(settings) {
+  if (fields.conversationMode) fields.conversationMode.value = settings.conversationMode;
   fields.maxTurns.value = String(settings.maxTurns);
   fields.temperature.value = String(settings.temperature);
   fields.maxOutputTokens.value = String(settings.maxOutputTokens);
@@ -58,7 +61,7 @@ async function init() {
     localStorage.setItem(CONTROL_SETTINGS_STORAGE_KEY, JSON.stringify(active));
   } catch {}
 
-  for (const field of Object.values(fields)) {
+  for (const field of Object.values(fields).filter(Boolean)) {
     field.addEventListener('change', persist);
     field.addEventListener('input', persist);
   }
