@@ -2,6 +2,44 @@ function safeText(value, maxLength = 10000) {
   return String(value ?? '').trim().slice(0, maxLength);
 }
 
+const EXPLICIT_SEARCH_PATTERN = /(?:\bsearch\b|tìm(?: kiếm)?(?: trên)? web|tra cứu|kiểm tra (?:trên )?web|xác minh(?: nguồn)?|tìm nguồn|lookup)/i;
+const WEATHER_PATTERN = /(?:thời tiết|weather|dự báo mưa|dự báo thời tiết|nhiệt độ)/i;
+const LIVE_FACT_PATTERN = /(?:giá|tỷ giá|tin tức|news|kết quả|tỉ số|score|lịch thi đấu|schedule|chứng khoán|stock|bitcoin|btc|ethereum|eth|vàng|xăng|current price)/i;
+const FRESH_PATTERN = /(?:hôm nay|hiện tại|bây giờ|mới nhất|vừa mới|today|current|now|latest|tuần này|this week|tháng này|this month|năm nay|this year)/i;
+
+function freshnessFromText(text) {
+  if (/(?:tuần này|this week)/i.test(text)) return 'pw';
+  if (/(?:tháng này|this month)/i.test(text)) return 'pm';
+  if (/(?:năm nay|this year)/i.test(text)) return 'py';
+  return 'pd';
+}
+
+export function getForcedResearchPlan(topic, history = []) {
+  const latest = history.at(-1);
+  const isImmediateUserRequest = latest?.speaker === 'user';
+  const isInitialTopic = history.length === 0;
+  const text = safeText(
+    isImmediateUserRequest ? latest?.text : (isInitialTopic ? topic : latest?.text),
+    600,
+  );
+  if (!text) return null;
+
+  const explicitSearch = EXPLICIT_SEARCH_PATTERN.test(text);
+  const realtimeIntent = WEATHER_PATTERN.test(text) || (LIVE_FACT_PATTERN.test(text) && FRESH_PATTERN.test(text));
+  const mustSearch = isImmediateUserRequest || isInitialTopic
+    ? explicitSearch || realtimeIntent
+    : explicitSearch;
+
+  if (!mustSearch) return null;
+  return {
+    search: true,
+    queries: [text],
+    freshness: freshnessFromText(text),
+    reason: explicitSearch ? 'deterministic-explicit-search' : 'deterministic-realtime-intent',
+    forced: true,
+  };
+}
+
 export function parseResearchPlan(text) {
   const raw = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
   const start = raw.indexOf('{');
@@ -24,16 +62,18 @@ export function parseResearchPlan(text) {
 }
 
 function fallbackPlan(topic, history) {
+  const forced = getForcedResearchPlan(topic, history);
+  if (forced) return forced;
   const latest = [...history].reverse().find((item) => item?.speaker === 'user') || history.at(-1);
   const text = safeText(latest?.text || topic, 600);
   if (!text) return { search: false, queries: [], freshness: '', reason: 'no-context' };
-  const currentIntent = /\b(hôm nay|hiện tại|mới nhất|vừa mới|bây giờ|thời tiết|tin tức|giá hiện tại|latest|today|current|news|weather)\b/i.test(text);
-  const explicitSearch = /\b(search|tìm (?:trên )?web|tra cứu|tìm kiếm|kiểm tra nguồn|xác minh)\b/i.test(text);
-  if (!currentIntent && !explicitSearch) return { search: false, queries: [], freshness: '', reason: 'fallback-no-trigger' };
-  return { search: true, queries: [text], freshness: currentIntent ? 'pd' : '', reason: 'fallback-trigger' };
+  return { search: false, queries: [], freshness: '', reason: 'fallback-no-trigger' };
 }
 
 export async function decideWebResearch({ provider, topic, history = [], agentName = 'AI', signal } = {}) {
+  const forced = getForcedResearchPlan(topic, history);
+  if (forced) return { ...forced, usage: null };
+
   const transcript = history.slice(-8).map((item) => `${item.name || item.speaker}: ${safeText(item.text, 1400)}`).join('\n');
   const today = new Date().toISOString().slice(0, 10);
   const messages = [
