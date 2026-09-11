@@ -1,13 +1,24 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { extname, join, normalize } from 'node:path';
+import { extname, join, normalize, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getAgentConfig, getAgentToolConfig, getImageGenConfig, getImageInputConfig, getPublicConfig, getServerConfig, getWebSearchConfig } from './config.js';
+import {
+  getAgentToolConfig,
+  getConfiguredAgentConfigs,
+  getContextConfig,
+  getDeepResearchConfig,
+  getImageGenConfig,
+  getImageInputConfig,
+  getPublicConfig,
+  getServerConfig,
+  getWebSearchConfig,
+} from './config.js';
 import { CloudflareImageTool } from './cloudflare-image-tool.js';
 import { createImageContextResolver } from './image-context.js';
 import { OpenAICompatibleImageTool } from './image-tool.js';
-import { ResumableConversationRoom } from './resumable-room.js';
+import { MultiAgentRoom } from './multi-agent-room.js';
+import { RoomManager, normalizeRoomId } from './room-manager.js';
 import { TavilyWebSearch } from './web-search.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -15,9 +26,12 @@ const publicDir = normalize(join(__dirname, '..', 'public'));
 const serverConfig = getServerConfig();
 const webSearchConfig = getWebSearchConfig();
 const webSearch = webSearchConfig.enabled ? new TavilyWebSearch(webSearchConfig) : null;
+const deepResearchConfig = getDeepResearchConfig();
+const contextConfig = getContextConfig();
 const imageGenConfig = getImageGenConfig();
 const imageInputConfig = getImageInputConfig();
 const agentToolConfig = getAgentToolConfig();
+const configuredAgents = getConfiguredAgentConfigs();
 
 function createImageTool(config) {
   if (!config.enabled) return null;
@@ -46,39 +60,37 @@ function createImageTool(config) {
 
 const imageTool = createImageTool(imageGenConfig);
 const imageContextResolver = imageInputConfig.enabled
-  ? createImageContextResolver({
-    publicDir,
-    maxImages: imageInputConfig.maxImages,
-    maxBytes: imageInputConfig.maxBytes,
-  })
+  ? createImageContextResolver({ publicDir, maxImages: imageInputConfig.maxImages, maxBytes: imageInputConfig.maxBytes })
   : null;
-const room = new ResumableConversationRoom({
-  agentA: getAgentConfig('a'),
-  agentB: getAgentConfig('b'),
-  hardTurnLimit: serverConfig.hardTurnLimit,
-  webSearch,
-  imageContextResolver,
-  imageTool: agentToolConfig.imageGenerationEnabled ? imageTool : null,
-  maxImageToolCallsPerTurn: agentToolConfig.maxImageCallsPerTurn,
-});
-
-const clients = new Set();
-const eventNames = [
-  'state', 'topic', 'meta', 'message:start', 'message:delta', 'message:done', 'message:cancelled', 'message:failed',
-  'stats', 'research:start', 'research:done', 'research:error', 'room:error',
-];
-for (const eventName of eventNames) {
-  room.on(eventName, (payload) => broadcast(eventName, payload));
-}
-room.on('error', (payload) => broadcast('room:error', payload));
 
 function sendSse(res, event, payload) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
 }
 
-function broadcast(event, payload) {
-  for (const client of clients) sendSse(client, event, payload);
-}
+const eventNames = [
+  'state', 'topic', 'meta', 'message:start', 'message:delta', 'message:done', 'message:cancelled', 'message:failed',
+  'stats', 'research:start', 'research:done', 'research:error', 'debug', 'room:error',
+];
+
+const manager = new RoomManager({
+  maxRooms: serverConfig.maxRooms,
+  roomTtlMs: serverConfig.roomTtlMs,
+  createRoom(roomId) {
+    const room = new MultiAgentRoom({
+      agents: configuredAgents,
+      hardTurnLimit: serverConfig.hardTurnLimit,
+      webSearch,
+      deepResearchConfig,
+      contextConfig,
+      imageContextResolver,
+      imageTool: agentToolConfig.imageGenerationEnabled ? imageTool : null,
+      maxImageToolCallsPerTurn: agentToolConfig.maxImageCallsPerTurn,
+    });
+    for (const eventName of eventNames) room.on(eventName, (payload) => manager.broadcast(roomId, eventName, payload, sendSse));
+    room.on('error', (payload) => manager.broadcast(roomId, 'room:error', payload, sendSse));
+    return room;
+  },
+});
 
 function json(res, status, payload) {
   const body = JSON.stringify(payload);
@@ -94,33 +106,33 @@ async function readJson(req) {
   let body = '';
   for await (const chunk of req) {
     body += chunk;
-    if (body.length > 512_000) throw new Error('Request body quá lớn.');
+    if (body.length > 1_000_000) throw new Error('Request body quá lớn.');
   }
   if (!body) return {};
-  try {
-    return JSON.parse(body);
-  } catch {
-    throw new Error('JSON không hợp lệ.');
-  }
+  try { return JSON.parse(body); }
+  catch { throw new Error('JSON không hợp lệ.'); }
+}
+
+function requestRoomId(req, url) {
+  return normalizeRoomId(url.searchParams.get('room') || req.headers['x-room-id'] || 'default-room');
 }
 
 function cleanImagePrompt(value) {
   return String(value || '').trim().slice(0, 12000);
 }
 
-function roomIsActive() {
+function roomIsActive(room) {
   return ['starting', 'running', 'paused', 'pausing'].includes(room.status) && Boolean(room.topic);
 }
 
-function recordImageMessage(prompt, attachment) {
-  if (!roomIsActive()) {
+function recordImageMessage(room, prompt, attachment) {
+  if (!roomIsActive(room)) {
     room.reset();
     room.topic = `Tạo ảnh: ${prompt.slice(0, 240)}`;
     room.status = 'completed';
     room.endedBy = 'tool';
     room.endReason = 'Phiên tạo ảnh trực tiếp bằng /img_gen.';
   }
-
   const entry = {
     id: randomUUID(),
     speaker: 'tool',
@@ -137,20 +149,37 @@ function recordImageMessage(prompt, attachment) {
   return entry;
 }
 
-async function handleApi(req, res, pathname) {
-  if (req.method === 'GET' && pathname === '/api/health') return json(res, 200, {
-    ok: true,
-    status: room.status,
-    webSearch: Boolean(webSearch),
-    imageGen: Boolean(imageTool),
-    imageProvider: imageTool ? imageGenConfig.provider : null,
-    imageInput: Boolean(imageContextResolver),
-    agentImageTool: Boolean(imageTool && agentToolConfig.imageGenerationEnabled && agentToolConfig.maxImageCallsPerTurn > 0),
-  });
+async function handleApi(req, res, url) {
+  const pathname = url.pathname;
+  const roomId = requestRoomId(req, url);
+
+  if (req.method === 'GET' && pathname === '/api/health') {
+    const room = manager.peek(roomId);
+    return json(res, 200, {
+      ok: true,
+      status: room?.room?.status || 'idle',
+      roomId,
+      roomManager: manager.stats(),
+      activeAgents: Object.keys(configuredAgents),
+      webSearch: Boolean(webSearch),
+      deepResearch: Boolean(webSearch && deepResearchConfig.enabled),
+      imageGen: Boolean(imageTool),
+      imageProvider: imageTool ? imageGenConfig.provider : null,
+      imageInput: Boolean(imageContextResolver),
+      agentImageTool: Boolean(imageTool && agentToolConfig.imageGenerationEnabled && agentToolConfig.maxImageCallsPerTurn > 0),
+    });
+  }
   if (req.method === 'GET' && pathname === '/api/config') return json(res, 200, getPublicConfig());
-  if (req.method === 'GET' && pathname === '/api/state') return json(res, 200, room.snapshot());
+  if (req.method === 'GET' && pathname === '/api/state') return json(res, 200, manager.get(roomId).room.snapshot());
+  if (req.method === 'POST' && pathname === '/api/rooms') {
+    const body = await readJson(req);
+    const id = normalizeRoomId(body.roomId || `room_${randomUUID().replace(/-/g, '')}`);
+    manager.get(id);
+    return json(res, 201, { roomId: id });
+  }
 
   if (req.method === 'GET' && pathname === '/api/events') {
+    const record = manager.get(roomId);
     res.writeHead(200, {
       'content-type': 'text/event-stream; charset=utf-8',
       'cache-control': 'no-cache, no-transform',
@@ -158,49 +187,29 @@ async function handleApi(req, res, pathname) {
       'x-accel-buffering': 'no',
     });
     res.write(': connected\n\n');
-    clients.add(res);
-    sendSse(res, 'state', room.snapshot());
-    req.on('close', () => clients.delete(res));
+    const detach = manager.attachClient(roomId, res);
+    sendSse(res, 'state', record.room.snapshot());
+    req.on('close', detach);
     return;
   }
 
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed.' });
   const body = await readJson(req);
+  const room = manager.get(roomId).room;
 
-  if (pathname === '/api/start') {
-    const state = await room.start(body);
-    return json(res, 200, state);
-  }
-  if (pathname === '/api/continue') {
-    const state = await room.continueFromHistory(body);
-    return json(res, 200, state);
-  }
-  if (pathname === '/api/pause') {
-    room.pause();
-    return json(res, 200, room.snapshot());
-  }
-  if (pathname === '/api/resume') {
-    room.resume();
-    return json(res, 200, room.snapshot());
-  }
-  if (pathname === '/api/stop') {
-    room.stop();
-    return json(res, 200, room.snapshot());
-  }
-  if (pathname === '/api/reset') {
-    room.reset();
-    return json(res, 200, room.snapshot());
-  }
-  if (pathname === '/api/message') {
-    const entry = room.addUserMessage(body.text);
-    return json(res, 200, entry);
-  }
+  if (pathname === '/api/start') return json(res, 200, await room.start(body));
+  if (pathname === '/api/continue') return json(res, 200, await room.continueFromHistory(body));
+  if (pathname === '/api/pause') { room.pause(); return json(res, 200, room.snapshot()); }
+  if (pathname === '/api/resume') { room.resume(); return json(res, 200, room.snapshot()); }
+  if (pathname === '/api/stop') { room.stop(); return json(res, 200, room.snapshot()); }
+  if (pathname === '/api/reset') { room.reset(); return json(res, 200, room.snapshot()); }
+  if (pathname === '/api/message') return json(res, 200, room.addUserMessage(body.text));
   if (pathname === '/api/tools/image') {
     if (!imageTool) return json(res, 503, { error: 'Tool tạo ảnh chưa được cấu hình hoặc đang bị tắt.' });
     const prompt = cleanImagePrompt(body.prompt);
     if (!prompt) return json(res, 400, { error: 'Hãy nhập mô tả ảnh sau /img_gen.' });
     const attachment = await imageTool.generate(prompt);
-    const entry = recordImageMessage(prompt, attachment);
+    const entry = recordImageMessage(room, prompt, attachment);
     return json(res, 200, { ok: true, entry });
   }
 
@@ -221,9 +230,10 @@ const mimeTypes = {
 };
 
 async function serveStatic(res, pathname) {
-  const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
-  const target = normalize(join(publicDir, relative));
-  if (!target.startsWith(publicDir)) return json(res, 403, { error: 'Forbidden.' });
+  const requested = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+  const target = normalize(join(publicDir, requested));
+  const rel = relative(publicDir, target);
+  if (rel.startsWith('..') || rel.includes(`..${sep}`)) return json(res, 403, { error: 'Forbidden.' });
   try {
     const data = await readFile(target);
     res.writeHead(200, {
@@ -245,26 +255,35 @@ async function serveStatic(res, pathname) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   try {
-    if (url.pathname.startsWith('/api/')) {
-      await handleApi(req, res, url.pathname);
-    } else {
-      await serveStatic(res, url.pathname);
-    }
+    if (url.pathname.startsWith('/api/')) await handleApi(req, res, url);
+    else await serveStatic(res, url.pathname);
   } catch (error) {
-    json(res, 400, { error: error?.message || String(error) });
+    const status = error?.code === 'PROVIDER_CIRCUIT_OPEN' ? 503 : 400;
+    json(res, status, { error: error?.message || String(error) });
   }
 });
 
 const heartbeat = setInterval(() => {
-  for (const client of clients) client.write(': ping\n\n');
+  for (const record of manager.rooms.values()) {
+    for (const client of record.clients) {
+      try { client.write(': ping\n\n'); } catch {}
+    }
+  }
 }, 20_000);
-heartbeat.unref();
+
+const cleanup = setInterval(() => manager.cleanup(), 10 * 60_000);
+heartbeat.unref?.();
+cleanup.unref?.();
+
+server.on('close', () => {
+  clearInterval(heartbeat);
+  clearInterval(cleanup);
+});
 
 server.listen(serverConfig.port, serverConfig.host, () => {
-  console.log(`AI Chat Lab running at http://${serverConfig.host}:${serverConfig.port}`);
-  console.log('API keys stay server-side. Configure them in .env; never commit that file.');
-  console.log(`Web search: ${webSearch ? `enabled (${webSearchConfig.provider})` : 'disabled'}.`);
-  console.log(`Image generation: ${imageTool ? `enabled (${imageGenConfig.provider}: ${imageGenConfig.model})` : 'disabled'}.`);
-  console.log(`Model image input: ${imageContextResolver ? `enabled (latest ${imageInputConfig.maxImages} image${imageInputConfig.maxImages === 1 ? '' : 's'})` : 'disabled'}.`);
-  console.log(`Agent image tool: ${imageTool && agentToolConfig.imageGenerationEnabled && agentToolConfig.maxImageCallsPerTurn > 0 ? `enabled (max ${agentToolConfig.maxImageCallsPerTurn}/turn)` : 'disabled'}.`);
+  const active = Object.values(configuredAgents).map((agent) => `${agent.id.toUpperCase()}:${agent.name}`).join(', ') || 'none';
+  console.log(`AI Conversation Lab: http://${serverConfig.host}:${serverConfig.port}`);
+  console.log(`Agents: ${active}`);
+  console.log(`Web search: ${webSearch ? 'enabled (tavily)' : 'disabled'}${webSearch && deepResearchConfig.enabled ? ' + deep-read' : ''}`);
+  console.log(`Multi-room: enabled (max ${serverConfig.maxRooms})`);
 });

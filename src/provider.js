@@ -122,9 +122,7 @@ export function toTextOnlyMessages(messages = []) {
 function extractDelta(payload) {
   const content = payload?.choices?.[0]?.delta?.content;
   if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content.map((part) => typeof part === 'string' ? part : (part?.text || '')).join('');
-  }
+  if (Array.isArray(content)) return content.map((part) => typeof part === 'string' ? part : (part?.text || '')).join('');
   return '';
 }
 
@@ -134,12 +132,7 @@ function collectToolCallDeltas(payload, target) {
   for (const chunk of chunks) {
     const index = Number.isInteger(chunk?.index) ? chunk.index : target.length;
     if (!target[index]) {
-      target[index] = {
-        index,
-        id: '',
-        type: 'function',
-        function: { name: '', arguments: '' },
-      };
+      target[index] = { index, id: '', type: 'function', function: { name: '', arguments: '' } };
     }
     const call = target[index];
     if (chunk?.id) call.id = String(chunk.id);
@@ -164,7 +157,12 @@ export function normalizeToolCalls(toolCalls = []) {
   })).filter((call) => call.function.name);
 }
 
-async function requestStream({ endpoint, apiKey, body, signal, includeUsage }) {
+function combinedSignal(parent, timeoutMs) {
+  const timeout = AbortSignal.timeout(Math.max(1000, Number(timeoutMs) || 120000));
+  return parent ? AbortSignal.any([parent, timeout]) : timeout;
+}
+
+async function requestStream({ endpoint, apiKey, body, signal, includeUsage, timeoutMs }) {
   const payload = includeUsage ? { ...body, stream_options: { include_usage: true } } : body;
   return fetch(endpoint, {
     method: 'POST',
@@ -173,21 +171,72 @@ async function requestStream({ endpoint, apiKey, body, signal, includeUsage }) {
       authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(payload),
-    signal,
+    signal: combinedSignal(signal, timeoutMs),
   });
 }
 
 export class OpenAICompatibleProvider {
-  constructor({ baseUrl, apiKey, model }) {
+  constructor({ baseUrl, apiKey, model, timeoutMs = 120000, circuitFailureThreshold = 3, circuitCooldownMs = 30000 }) {
     this.endpoint = chatEndpoint(baseUrl);
     this.apiKey = apiKey;
     this.model = model;
+    this.timeoutMs = Math.max(1000, Number(timeoutMs) || 120000);
+    this.circuitFailureThreshold = Math.max(1, Number(circuitFailureThreshold) || 3);
+    this.circuitCooldownMs = Math.max(1000, Number(circuitCooldownMs) || 30000);
+    this.failureCount = 0;
+    this.circuitOpenUntil = 0;
     this.visionSupport = null;
     this.toolSupport = null;
     this.streamUsageSupport = null;
   }
 
-  async streamChat({
+  circuitState(now = Date.now()) {
+    if (this.circuitOpenUntil > now) return 'open';
+    if (this.circuitOpenUntil) return 'half-open';
+    return 'closed';
+  }
+
+  assertCircuit() {
+    if (this.circuitOpenUntil > Date.now()) {
+      const waitMs = this.circuitOpenUntil - Date.now();
+      const error = new Error(`Provider circuit breaker đang mở. Thử lại sau khoảng ${Math.ceil(waitMs / 1000)} giây.`);
+      error.code = 'PROVIDER_CIRCUIT_OPEN';
+      throw error;
+    }
+  }
+
+  registerSuccess() {
+    this.failureCount = 0;
+    this.circuitOpenUntil = 0;
+  }
+
+  registerFailure() {
+    this.failureCount += 1;
+    if (this.failureCount >= this.circuitFailureThreshold) this.circuitOpenUntil = Date.now() + this.circuitCooldownMs;
+  }
+
+  async streamChat(options) {
+    this.assertCircuit();
+    const started = Date.now();
+    try {
+      const result = await this.#streamChat(options);
+      this.registerSuccess();
+      return {
+        ...result,
+        diagnostics: {
+          ...(result.diagnostics || {}),
+          elapsedMs: Date.now() - started,
+          timeoutMs: this.timeoutMs,
+          circuit: this.circuitState(),
+        },
+      };
+    } catch (error) {
+      if (!options?.signal?.aborted) this.registerFailure();
+      throw error;
+    }
+  }
+
+  async #streamChat({
     messages,
     temperature = 0.8,
     maxOutputTokens = 1200,
@@ -202,6 +251,7 @@ export class OpenAICompatibleProvider {
     const requestedTools = Array.isArray(tools) ? tools.filter(Boolean) : [];
     let useTools = requestedTools.length > 0 && this.toolSupport !== false;
     let toolFallback = requestedTools.length > 0 && this.toolSupport === false;
+    let requestCount = 0;
 
     const makeBody = () => ({
       model: this.model,
@@ -212,24 +262,17 @@ export class OpenAICompatibleProvider {
       ...(useTools ? { tools: requestedTools, tool_choice: toolChoice || 'auto' } : {}),
     });
 
+    const doRequest = async (body, includeUsage) => {
+      requestCount += 1;
+      return requestStream({ endpoint: this.endpoint, apiKey: this.apiKey, body, signal, includeUsage, timeoutMs: this.timeoutMs });
+    };
+
     let body = makeBody();
     let includeUsage = this.streamUsageSupport !== false;
-    let response = await requestStream({
-      endpoint: this.endpoint,
-      apiKey: this.apiKey,
-      body,
-      signal,
-      includeUsage,
-    });
+    let response = await doRequest(body, includeUsage);
 
     if (!response.ok && includeUsage && [400, 404, 422].includes(response.status)) {
-      const retry = await requestStream({
-        endpoint: this.endpoint,
-        apiKey: this.apiKey,
-        body,
-        signal,
-        includeUsage: false,
-      });
+      const retry = await doRequest(body, false);
       if (retry.ok) this.streamUsageSupport = false;
       response = retry;
       includeUsage = false;
@@ -240,13 +283,7 @@ export class OpenAICompatibleProvider {
     if (!response.ok && multimodal && !visionFallback && [400, 404, 415, 422].includes(response.status)) {
       visionFallback = true;
       body = makeBody();
-      response = await requestStream({
-        endpoint: this.endpoint,
-        apiKey: this.apiKey,
-        body,
-        signal,
-        includeUsage: false,
-      });
+      response = await doRequest(body, false);
       if (response.ok) this.visionSupport = false;
     }
 
@@ -254,13 +291,7 @@ export class OpenAICompatibleProvider {
       useTools = false;
       toolFallback = true;
       body = makeBody();
-      response = await requestStream({
-        endpoint: this.endpoint,
-        apiKey: this.apiKey,
-        body,
-        signal,
-        includeUsage: false,
-      });
+      response = await doRequest(body, false);
       if (response.ok) this.toolSupport = false;
     }
 
@@ -316,6 +347,12 @@ export class OpenAICompatibleProvider {
       visionAccepted: multimodal && !visionFallback,
       toolFallback,
       toolsAccepted: requestedTools.length > 0 && useTools,
+      diagnostics: {
+        requestCount,
+        streamUsageSupport: this.streamUsageSupport,
+        visionSupport: this.visionSupport,
+        toolSupport: this.toolSupport,
+      },
     };
   }
 }

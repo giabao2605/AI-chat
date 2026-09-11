@@ -1,14 +1,14 @@
 {
   "name": "ai-chat-lab",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "A lightweight room where two AI models can talk to each other while a human observes or joins in.",
+  "description": "A lightweight multi-agent AI conversation lab with isolated rooms, research, tools and debugging.",
   "scripts": {
     "start": "node --env-file-if-exists=.env src/server.js",
     "dev": "node --watch --env-file-if-exists=.env src/server.js",
     "test": "node --test",
-    "check": "node --check src/config.js && node --check src/provider.js && node --check src/web-search.js && node --check src/research.js && node --check src/agent-tools.js && node --check src/image-tool.js && node --check src/cloudflare-image-tool.js && node --check src/image-context.js && node --check src/conversation-end.js && node --check src/orchestrator.js && node --check src/resumable-room.js && node --check src/server.js && node --check public/history.js && node --check public/history-resume.js && node --check public/history-resume-ui.js && node --check public/prompt-settings.js && node --check public/prompt-ui.js && node --check public/control-settings.js && node --check public/control-ui.js && node --check public/composer-mode.js && node --check public/composer-focus.js && node --check public/image-command.js && node --check public/image-tool-ui.js && node --check public/markdown.js && node --check public/markdown-ui.js && node --check public/app.js && node --check public/research-status.js"
+    "check": "node --check src/config.js && node --check src/provider.js && node --check src/web-search.js && node --check src/research.js && node --check src/deep-research.js && node --check src/room-manager.js && node --check src/multi-agent-room.js && node --check src/agent-tools.js && node --check src/image-tool.js && node --check src/cloudflare-image-tool.js && node --check src/image-context.js && node --check src/conversation-end.js && node --check src/orchestrator.js && node --check src/resumable-room.js && node --check src/server.js && node --check public/history.js && node --check public/history-resume.js && node --check public/history-resume-ui.js && node --check public/prompt-settings.js && node --check public/prompt-ui.js && node --check public/control-settings.js && node --check public/control-ui.js && node --check public/composer-mode.js && node --check public/composer-focus.js && node --check public/image-command.js && node --check public/image-tool-ui.js && node --check public/markdown.js && node --check public/markdown-ui.js && node --check public/app.js && node --check public/research-status.js && node --check public/room-session.js && node --check public/lab-v2.js"
   },
   "engines": {"node": ">=22"}
 }

@@ -3,13 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Quan sát hai AI trò chuyện với nhau hoặc tham gia trực tiếp vào phòng chat." />
+  <meta name="description" content="Quan sát nhiều AI trò chuyện với nhau hoặc tham gia trực tiếp vào phòng chat." />
   <title>AI Conversation Lab</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/layout-v2.css" />
   <link rel="stylesheet" href="/ui-v3.css" />
   <link rel="stylesheet" href="/chat-v4.css" />
   <link rel="stylesheet" href="/research-status.css" />
+  <link rel="stylesheet" href="/lab-v2.css" />
 </head>
 <body>
   <div class="app-shell">
@@ -31,7 +32,7 @@
           <button id="returnLiveBtn" class="button ghost" type="button">Quay lại phiên hiện tại</button>
         </div>
 
-        <div id="chat" class="chat" aria-live="polite"><div class="empty-state"><div class="empty-orbit">A ↔ B</div><h3>Chưa có cuộc trò chuyện.</h3><p>Chọn một chủ đề bên trái hoặc để hai AI tự chọn rồi bắt đầu. Bạn có thể quan sát hoặc chen vào bất cứ lúc nào.</p></div></div>
+        <div id="chat" class="chat" aria-live="polite"><div class="empty-state"><div class="empty-orbit">A ↔ B ↔ C ↔ D</div><h3>Chưa có cuộc trò chuyện.</h3><p>Chọn một chủ đề hoặc để AI tự chọn rồi bắt đầu. Agent C/D sẽ tự tham gia khi đã cấu hình trong .env.</p></div></div>
         <form id="userForm" class="composer"><input id="userInput" type="text" maxlength="20000" placeholder="Chen vào cuộc trò chuyện..." autocomplete="off" disabled /><button id="sendBtn" class="button primary" type="submit" disabled>Gửi</button></form>
       </section>
 
@@ -73,9 +74,9 @@
 
         <section class="control-section" aria-labelledby="sessionSectionLabel">
           <div id="sessionSectionLabel" class="section-kicker">Phiên</div>
-          <label class="field"><span>Kiểu hội thoại</span><select id="conversationMode"><option value="turns">Theo lượt</option><option value="parallel">Tự do / song song</option></select><small>Theo lượt: A → B. Song song: cả hai có thể trả lời cùng lúc và tự bắt nhịp theo tin mới.</small></label>
+          <label class="field"><span>Kiểu hội thoại</span><select id="conversationMode"><option value="turns">Theo lượt</option><option value="parallel">Tự do / song song</option></select><small>Theo lượt: các AI luân phiên. Song song: nhiều AI có thể trả lời cùng lúc và tự bắt nhịp theo tin mới.</small></label>
           <label class="field"><span>Chế độ chủ đề</span><select id="topicMode"><option value="manual">Tôi chọn chủ đề</option><option value="auto">AI tự chọn chủ đề</option></select></label>
-          <label id="topicField" class="field"><span>Chủ đề</span><textarea id="topic" rows="3" placeholder="Ví dụ: Nếu hai AI phải cùng thiết kế một thành phố trên Sao Hỏa..."></textarea></label>
+          <label id="topicField" class="field"><span>Chủ đề</span><textarea id="topic" rows="3" placeholder="Ví dụ: Nếu bốn AI phải cùng thiết kế một thành phố trên Sao Hỏa..."></textarea></label>
           <div class="two-cols"><label class="field"><span>Số lượt</span><input id="maxTurns" type="number" min="1" max="200" value="20" /></label><label class="field"><span>AI ưu tiên mở lời</span><select id="startSpeaker"><option value="random">Ngẫu nhiên</option><option value="a">Agent A</option><option value="b">Agent B</option></select></label></div>
         </section>
 
@@ -112,7 +113,7 @@
   <div id="historyBackdrop" class="history-backdrop hidden"></div>
   <aside id="historyDrawer" class="history-drawer" aria-hidden="true">
     <div class="history-header">
-      <div><div class="eyebrow">LOCAL HISTORY</div><h2>Lịch sử trò chuyện</h2><p>Tối đa 50 phiên trên trình duyệt này.</p></div>
+      <div><div class="eyebrow">LOCAL HISTORY</div><h2>Lịch sử trò chuyện</h2><p>UI giữ 50 phiên gần nhất; runtime v2 còn mirror snapshot vào IndexedDB.</p></div>
       <button id="closeHistoryBtn" class="icon-button" type="button" title="Đóng">×</button>
     </div>
     <div class="history-actions"><button id="clearHistoryBtn" class="button danger" type="button">Xóa toàn bộ lịch sử</button></div>
@@ -120,10 +121,12 @@
   </aside>
 
   <div id="toast" class="toast" role="status"></div>
+  <script type="module" src="/room-session.js"></script>
   <script type="module" src="/prompt-ui.js"></script>
   <script type="module" src="/app.js"></script>
   <script type="module" src="/composer-focus.js"></script>
   <script type="module" src="/control-ui.js"></script>
   <script type="module" src="/research-status.js"></script>
+  <script type="module" src="/lab-v2.js"></script>
 </body>
 </html>
