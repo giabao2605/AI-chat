@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_SHARED_PROMPT } from './config.js';
 import { OpenAICompatibleProvider } from './provider.js';
+import { buildWebResearchContext, decideWebResearch } from './research.js';
 
 function clamp(value, min, max, fallback) {
   const n = Number(value);
@@ -10,6 +11,17 @@ function clamp(value, min, max, fallback) {
 
 function safeText(value, maxLength = 20000) {
   return String(value ?? '').trim().slice(0, maxLength);
+}
+
+function sourceMetadata(source) {
+  return {
+    id: source.id,
+    title: source.title,
+    url: source.url,
+    domain: source.domain,
+    age: source.age || '',
+    query: source.query || '',
+  };
 }
 
 export function buildMessagesForAgent({ agentId, agentName, topic, history, sharedPrompt, personaPrompt }) {
@@ -37,11 +49,12 @@ function blankStats() {
 }
 
 export class ConversationRoom extends EventEmitter {
-  constructor({ agentA, agentB, hardTurnLimit = 200, providerFactory } = {}) {
+  constructor({ agentA, agentB, hardTurnLimit = 200, providerFactory, webSearch = null } = {}) {
     super();
     this.agentConfigs = { a: agentA, b: agentB };
     this.hardTurnLimit = hardTurnLimit;
     this.providerFactory = providerFactory || ((config) => new OpenAICompatibleProvider(config));
+    this.webSearch = webSearch;
     this.providers = {};
     this.reset();
   }
@@ -205,6 +218,48 @@ export class ConversationRoom extends EventEmitter {
     }
   }
 
+  async addWebResearch(agentId, messages, signal) {
+    if (!this.webSearch) return [];
+    const agent = this.agentConfigs[agentId];
+    const plan = await decideWebResearch({
+      provider: this.providers[agentId],
+      topic: this.topic,
+      history: this.history,
+      agentName: agent.name,
+      signal,
+    });
+    if (plan.usage) this.addUsage(agentId, plan.usage, false);
+    if (!plan.search) return [];
+
+    this.emit('research:start', {
+      speaker: agentId,
+      name: agent.name,
+      queries: plan.queries,
+      freshness: plan.freshness || null,
+    });
+
+    try {
+      const research = await this.webSearch.searchMany({
+        queries: plan.queries,
+        freshness: plan.freshness,
+        signal,
+      });
+      const context = buildWebResearchContext(research);
+      const sources = research.sources.map(sourceMetadata);
+      if (context) messages.splice(1, 0, { role: 'system', content: context });
+      this.emit('research:done', { speaker: agentId, name: agent.name, queries: research.queries, sources });
+      return sources;
+    } catch (error) {
+      if (error?.name === 'AbortError' || signal?.aborted) throw error;
+      this.emit('research:error', { speaker: agentId, name: agent.name, message: error?.message || String(error) });
+      messages.splice(1, 0, {
+        role: 'system',
+        content: 'Công cụ web vừa thất bại. Nếu câu trả lời phụ thuộc thông tin hiện tại, hãy nói rõ rằng bạn chưa xác minh được dữ liệu mới thay vì đoán.',
+      });
+      return [];
+    }
+  }
+
   async runAgentTurn(agentId, activeRunId = this.runId) {
     const agent = this.agentConfigs[agentId];
     const messageId = randomUUID();
@@ -218,6 +273,15 @@ export class ConversationRoom extends EventEmitter {
       sharedPrompt: this.settings.sharedPrompt,
       personaPrompt: agentId === 'a' ? this.settings.personaA : this.settings.personaB,
     });
+
+    let sources = [];
+    try {
+      sources = await this.addWebResearch(agentId, messages, this.abortController.signal);
+    } catch (error) {
+      if (error?.name === 'AbortError' || activeRunId !== this.runId) return;
+      throw error;
+    }
+    if (activeRunId !== this.runId || ['stopped', 'idle', 'error'].includes(this.status)) return;
 
     this.emit('message:start', { id: messageId, speaker: agentId, name: agent.name });
     let result;
@@ -250,6 +314,7 @@ export class ConversationRoom extends EventEmitter {
       text,
       createdAt: new Date().toISOString(),
       usage: result.usage,
+      sources,
     };
     this.history.push(entry);
     this.addUsage(agentId, result.usage, true);
@@ -278,6 +343,7 @@ export class ConversationRoom extends EventEmitter {
       text: cleaned,
       createdAt: new Date().toISOString(),
       usage: null,
+      sources: [],
     };
     this.history.push(entry);
     this.emit('message:done', entry);

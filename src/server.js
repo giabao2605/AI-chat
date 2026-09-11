@@ -2,20 +2,27 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getAgentConfig, getPublicConfig, getServerConfig } from './config.js';
+import { getAgentConfig, getPublicConfig, getServerConfig, getWebSearchConfig } from './config.js';
 import { ConversationRoom } from './orchestrator.js';
+import { BraveWebSearch } from './web-search.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = normalize(join(__dirname, '..', 'public'));
 const serverConfig = getServerConfig();
+const webSearchConfig = getWebSearchConfig();
+const webSearch = webSearchConfig.enabled ? new BraveWebSearch(webSearchConfig) : null;
 const room = new ConversationRoom({
   agentA: getAgentConfig('a'),
   agentB: getAgentConfig('b'),
   hardTurnLimit: serverConfig.hardTurnLimit,
+  webSearch,
 });
 
 const clients = new Set();
-const eventNames = ['state', 'topic', 'meta', 'message:start', 'message:delta', 'message:done', 'message:cancelled', 'message:failed', 'stats', 'room:error'];
+const eventNames = [
+  'state', 'topic', 'meta', 'message:start', 'message:delta', 'message:done', 'message:cancelled', 'message:failed',
+  'stats', 'research:start', 'research:done', 'research:error', 'room:error',
+];
 for (const eventName of eventNames) {
   room.on(eventName, (payload) => broadcast(eventName, payload));
 }
@@ -54,7 +61,7 @@ async function readJson(req) {
 }
 
 async function handleApi(req, res, pathname) {
-  if (req.method === 'GET' && pathname === '/api/health') return json(res, 200, { ok: true, status: room.status });
+  if (req.method === 'GET' && pathname === '/api/health') return json(res, 200, { ok: true, status: room.status, webSearch: Boolean(webSearch) });
   if (req.method === 'GET' && pathname === '/api/config') return json(res, 200, getPublicConfig());
   if (req.method === 'GET' && pathname === '/api/state') return json(res, 200, room.snapshot());
 
@@ -154,4 +161,5 @@ heartbeat.unref();
 server.listen(serverConfig.port, serverConfig.host, () => {
   console.log(`AI Chat Lab running at http://${serverConfig.host}:${serverConfig.port}`);
   console.log('API keys stay server-side. Configure them in .env; never commit that file.');
+  console.log(`Web search: ${webSearch ? `enabled (${webSearchConfig.provider})` : 'disabled'}.`);
 });
