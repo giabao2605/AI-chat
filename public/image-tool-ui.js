@@ -140,10 +140,24 @@ function renderAttachments(article, entry) {
 }
 
 function decorateArticle(article) {
-  if (!(article instanceof HTMLElement) || !article.matches('.message.tool[data-message-id]')) return;
+  if (!(article instanceof HTMLElement) || !article.matches('.message.tool[data-message-id]')) return true;
+  if (article.querySelector('.image-attachment-grid')) return true;
   const id = article.dataset.messageId;
   const entry = attachmentCache.get(id) || readStoredEntry(id);
+  if (!entry) return false;
   renderAttachments(article, entry);
+  return true;
+}
+
+function scheduleArticleDecoration(article, attempt = 0) {
+  if (!(article instanceof HTMLElement)) return;
+  if (decorateArticle(article)) return;
+  // Autonomous agent tool calls arrive through SSE as message:done immediately before the
+  // following state event persists that same entry into localStorage. Retry briefly so the
+  // attachment can be discovered after persistence instead of rendering text-only forever.
+  if (attempt < 16) {
+    setTimeout(() => scheduleArticleDecoration(article, attempt + 1), 40 + attempt * 25);
+  }
 }
 
 function scheduleDecorate(entry, attempt = 0) {
@@ -223,13 +237,13 @@ function setupHistoryDecoration() {
     for (const mutation of mutations) {
       for (const node of mutation.addedNodes) {
         if (!(node instanceof HTMLElement)) continue;
-        if (node.matches('.message.tool')) decorateArticle(node);
-        for (const article of node.querySelectorAll?.('.message.tool[data-message-id]') || []) decorateArticle(article);
+        if (node.matches('.message.tool')) scheduleArticleDecoration(node);
+        for (const article of node.querySelectorAll?.('.message.tool[data-message-id]') || []) scheduleArticleDecoration(article);
       }
     }
   });
   observer.observe(chat, { childList: true, subtree: true });
-  for (const article of chat.querySelectorAll('.message.tool[data-message-id]')) decorateArticle(article);
+  for (const article of chat.querySelectorAll('.message.tool[data-message-id]')) scheduleArticleDecoration(article);
 }
 
 if (form && input) {
