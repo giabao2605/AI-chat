@@ -184,6 +184,44 @@ export class OpenAICompatibleProvider {
     this.model = model;
     this.visionSupport = null;
     this.toolSupport = null;
+    this.streamUsageSupport = null;
+  }
+
+  async request(body, signal) {
+    if (this.streamUsageSupport === false) {
+      return requestStream({
+        endpoint: this.endpoint,
+        apiKey: this.apiKey,
+        body,
+        signal,
+        includeUsage: false,
+      });
+    }
+
+    let response = await requestStream({
+      endpoint: this.endpoint,
+      apiKey: this.apiKey,
+      body,
+      signal,
+      includeUsage: true,
+    });
+
+    if (response.ok) {
+      this.streamUsageSupport = true;
+      return response;
+    }
+
+    if (![400, 404, 422].includes(response.status)) return response;
+
+    const fallback = await requestStream({
+      endpoint: this.endpoint,
+      apiKey: this.apiKey,
+      body,
+      signal,
+      includeUsage: false,
+    });
+    if (fallback.ok) this.streamUsageSupport = false;
+    return fallback;
   }
 
   async streamChat({
@@ -212,34 +250,12 @@ export class OpenAICompatibleProvider {
     });
 
     let body = makeBody();
-    let response = await requestStream({
-      endpoint: this.endpoint,
-      apiKey: this.apiKey,
-      body,
-      signal,
-      includeUsage: true,
-    });
-
-    if (!response.ok && [400, 404, 422].includes(response.status)) {
-      response = await requestStream({
-        endpoint: this.endpoint,
-        apiKey: this.apiKey,
-        body,
-        signal,
-        includeUsage: false,
-      });
-    }
+    let response = await this.request(body, signal);
 
     if (!response.ok && multimodal && !visionFallback && [400, 404, 415, 422].includes(response.status)) {
       visionFallback = true;
       body = makeBody();
-      response = await requestStream({
-        endpoint: this.endpoint,
-        apiKey: this.apiKey,
-        body,
-        signal,
-        includeUsage: false,
-      });
+      response = await this.request(body, signal);
       if (response.ok) this.visionSupport = false;
     }
 
@@ -247,13 +263,7 @@ export class OpenAICompatibleProvider {
       useTools = false;
       toolFallback = true;
       body = makeBody();
-      response = await requestStream({
-        endpoint: this.endpoint,
-        apiKey: this.apiKey,
-        body,
-        signal,
-        includeUsage: false,
-      });
+      response = await this.request(body, signal);
       if (response.ok) this.toolSupport = false;
     }
 
