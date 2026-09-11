@@ -6,6 +6,7 @@ const EXPLICIT_SEARCH_PATTERN = /(?:\bsearch\b|tìm(?: kiếm)?(?: trên)? web|t
 const WEATHER_PATTERN = /(?:thời tiết|weather|dự báo mưa|dự báo thời tiết|nhiệt độ)/i;
 const LIVE_FACT_PATTERN = /(?:giá|tỷ giá|tin tức|news|kết quả|tỉ số|score|lịch thi đấu|schedule|chứng khoán|stock|bitcoin|btc|ethereum|eth|vàng|xăng|current price)/i;
 const FRESH_PATTERN = /(?:hôm nay|hiện tại|bây giờ|mới nhất|vừa mới|today|current|now|latest|tuần này|this week|tháng này|this month|năm nay|this year)/i;
+const AMBIGUOUS_RESEARCH_PATTERN = /(?:có\s+(?:đúng|thật)|thực\s+sự|đáng\s+tin|kiểm\s+chứng|xác\s+minh|fact[- ]?check|bằng\s+chứng|nguồn(?:\s+nào|\s+đâu)?|theo\s+(?:nghiên\s+cứu|báo\s+cáo)|nghiên\s+cứu(?:\s+nào)?|số\s+liệu|dữ\s+liệu(?:\s+mới|\s+hiện\s+tại)?|reliable|accurate|verify|evidence|sources?|research|report|phiên\s+bản|version|release|ra\s+mắt|cập\s+nhật|updates?|chức\s+vụ|hiện\s+còn|còn\s+hỗ\s+trợ|currently|recent(?:ly)?|gần\s+đây|đang\s+diễn\s+ra|sắp\s+tới|upcoming)/i;
 
 function freshnessFromText(text) {
   if (/(?:tuần này|this week)/i.test(text)) return 'pw';
@@ -14,14 +15,21 @@ function freshnessFromText(text) {
   return 'pd';
 }
 
+function researchInputText(topic, history = []) {
+  const latest = history.at(-1);
+  const isImmediateUserRequest = latest?.speaker === 'user';
+  const isInitialTopic = history.length === 0;
+  return safeText(
+    isImmediateUserRequest ? latest?.text : (isInitialTopic ? topic : latest?.text),
+    600,
+  );
+}
+
 export function getForcedResearchPlan(topic, history = []) {
   const latest = history.at(-1);
   const isImmediateUserRequest = latest?.speaker === 'user';
   const isInitialTopic = history.length === 0;
-  const text = safeText(
-    isImmediateUserRequest ? latest?.text : (isInitialTopic ? topic : latest?.text),
-    600,
-  );
+  const text = researchInputText(topic, history);
   if (!text) return null;
 
   const explicitSearch = EXPLICIT_SEARCH_PATTERN.test(text);
@@ -39,6 +47,26 @@ export function getForcedResearchPlan(topic, history = []) {
     freshness: realtimeIntent || temporalIntent ? freshnessFromText(text) : '',
     reason: explicitSearch ? 'deterministic-explicit-search' : 'deterministic-realtime-intent',
     forced: true,
+  };
+}
+
+export function getFastNoResearchPlan(topic, history = []) {
+  const text = researchInputText(topic, history);
+  if (!text) return { search: false, queries: [], freshness: '', reason: 'no-context', fastPath: true };
+
+  // Current-year references often imply a freshness requirement even when the user did not
+  // literally say "latest". Leave those to the compact planner instead of assuming stale knowledge is fine.
+  const currentYear = String(new Date().getFullYear());
+  if (AMBIGUOUS_RESEARCH_PATTERN.test(text) || text.includes(currentYear)) return null;
+
+  // Most turns in a long AI-to-AI conversation are opinions, reasoning, follow-ups or creative work.
+  // Returning here removes an entire hidden model request from the critical path.
+  return {
+    search: false,
+    queries: [],
+    freshness: '',
+    reason: 'deterministic-no-research',
+    fastPath: true,
   };
 }
 
@@ -75,6 +103,9 @@ function fallbackPlan(topic, history) {
 export async function decideWebResearch({ provider, topic, history = [], agentName = 'AI', signal } = {}) {
   const forced = getForcedResearchPlan(topic, history);
   if (forced) return { ...forced, usage: null };
+
+  const fastNoResearch = getFastNoResearchPlan(topic, history);
+  if (fastNoResearch) return { ...fastNoResearch, usage: null };
 
   const transcript = history.slice(-8).map((item) => `${item.name || item.speaker}: ${safeText(item.text, 1400)}`).join('\n');
   const today = new Date().toISOString().slice(0, 10);
