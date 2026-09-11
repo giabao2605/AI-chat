@@ -5,13 +5,60 @@ function chatEndpoint(baseUrl) {
   return `${normalized}/chat/completions`;
 }
 
+function imagePartUrl(part) {
+  const raw = typeof part?.image_url === 'string' ? part.image_url : part?.image_url?.url;
+  const url = String(raw || '').trim();
+  if (/^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(url)) return url;
+  if (/^https:\/\//i.test(url)) return url;
+  return '';
+}
+
+export function contentToText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return String(content ?? '');
+  return content.map((part) => {
+    if (typeof part === 'string') return part;
+    if (part?.type === 'text') return String(part.text || '');
+    if (part?.type === 'image_url' && imagePartUrl(part)) return '[image]';
+    return '';
+  }).filter(Boolean).join('\n');
+}
+
+function normalizeContentForProvider(content) {
+  if (!Array.isArray(content)) return String(content ?? '');
+  const parts = [];
+  for (const part of content) {
+    if (typeof part === 'string') {
+      if (part.trim()) parts.push({ type: 'text', text: part });
+      continue;
+    }
+    if (part?.type === 'text') {
+      const text = String(part.text || '');
+      if (text.trim()) parts.push({ type: 'text', text });
+      continue;
+    }
+    if (part?.type === 'image_url') {
+      const url = imagePartUrl(part);
+      if (!url) continue;
+      parts.push({
+        type: 'image_url',
+        image_url: {
+          url,
+          ...(part?.image_url?.detail ? { detail: part.image_url.detail } : {}),
+        },
+      });
+    }
+  }
+  return parts.length ? parts : '';
+}
+
 export function estimateTokensFromText(text) {
   const chars = String(text || '').length;
   return chars === 0 ? 0 : Math.max(1, Math.ceil(chars / 4));
 }
 
 export function estimateUsage(messages, outputText) {
-  const inputText = messages.map((message) => `${message.role}:${message.content}`).join('\n');
+  const inputText = messages.map((message) => `${message.role}:${contentToText(message.content)}`).join('\n');
   const inputTokens = estimateTokensFromText(inputText);
   const outputTokens = estimateTokensFromText(outputText);
   return {
@@ -42,15 +89,34 @@ export function normalizeMessagesForProvider(messages = []) {
   for (const message of messages) {
     if (!message || typeof message !== 'object') continue;
     const role = String(message.role || '');
-    const content = String(message.content ?? '');
+    const content = normalizeContentForProvider(message.content);
     if (role === 'system') {
-      if (content.trim()) systemParts.push(content.trim());
+      const systemText = contentToText(content).trim();
+      if (systemText) systemParts.push(systemText);
     } else {
       rest.push({ ...message, role, content });
     }
   }
   if (!systemParts.length) return rest;
   return [{ role: 'system', content: systemParts.join('\n\n') }, ...rest];
+}
+
+export function hasImageInput(messages = []) {
+  return messages.some((message) => Array.isArray(message?.content)
+    && message.content.some((part) => part?.type === 'image_url' && imagePartUrl(part)));
+}
+
+export function toTextOnlyMessages(messages = []) {
+  return messages.map((message) => {
+    if (!Array.isArray(message?.content)) return message;
+    const text = message.content.map((part) => {
+      if (typeof part === 'string') return part;
+      if (part?.type === 'text') return String(part.text || '');
+      if (part?.type === 'image_url') return '[Ảnh đính kèm không được provider này chấp nhận ở lượt hiện tại.]';
+      return '';
+    }).filter(Boolean).join('\n');
+    return { ...message, content: text };
+  });
 }
 
 function extractDelta(payload) {
@@ -84,13 +150,15 @@ export class OpenAICompatibleProvider {
 
   async streamChat({ messages, temperature = 0.8, maxOutputTokens = 1200, signal, onDelta = () => {} }) {
     const providerMessages = normalizeMessagesForProvider(messages);
-    const body = {
+    let body = {
       model: this.model,
       messages: providerMessages,
       stream: true,
       temperature,
       max_tokens: maxOutputTokens,
     };
+    const multimodal = hasImageInput(providerMessages);
+    let visionFallback = false;
 
     let response = await requestStream({
       endpoint: this.endpoint,
@@ -101,6 +169,18 @@ export class OpenAICompatibleProvider {
     });
 
     if (!response.ok && [400, 404, 422].includes(response.status)) {
+      response = await requestStream({
+        endpoint: this.endpoint,
+        apiKey: this.apiKey,
+        body,
+        signal,
+        includeUsage: false,
+      });
+    }
+
+    if (!response.ok && multimodal && [400, 404, 415, 422].includes(response.status)) {
+      visionFallback = true;
+      body = { ...body, messages: toTextOnlyMessages(providerMessages) };
       response = await requestStream({
         endpoint: this.endpoint,
         apiKey: this.apiKey,
@@ -150,6 +230,11 @@ export class OpenAICompatibleProvider {
     buffer += decoder.decode();
     if (buffer) consumeLine(buffer);
 
-    return { text: fullText.trim(), usage: usage || estimateUsage(providerMessages, fullText) };
+    return {
+      text: fullText.trim(),
+      usage: usage || estimateUsage(body.messages, fullText),
+      visionFallback,
+      visionAccepted: multimodal && !visionFallback,
+    };
   }
 }
