@@ -9,13 +9,21 @@ function clampInteger(value, min, max, fallback) {
   return Math.round(clampNumber(value, min, max, fallback));
 }
 
+function normalizeConversationMode(value, fallback = 'turns') {
+  if (value === 'parallel') return 'parallel';
+  if (value === 'turns') return 'turns';
+  return fallback === 'parallel' ? 'parallel' : 'turns';
+}
+
 export function createControlSettings(values = {}, fallback = {}, savedAt = new Date().toISOString()) {
   const fallbackMaxTurns = clampInteger(fallback.maxTurns, 1, 200, 20);
   const fallbackTemperature = clampNumber(fallback.temperature, 0, 2, 0.8);
   const fallbackMaxOutputTokens = clampInteger(fallback.maxOutputTokens, 64, 16000, 1200);
   const fallbackSpeaker = ['random', 'a', 'b'].includes(fallback.startSpeaker) ? fallback.startSpeaker : 'random';
+  const fallbackConversationMode = normalizeConversationMode(fallback.conversationMode, 'turns');
 
   return {
+    conversationMode: normalizeConversationMode(values.conversationMode, fallbackConversationMode),
     maxTurns: clampInteger(values.maxTurns, 1, 200, fallbackMaxTurns),
     temperature: clampNumber(values.temperature, 0, 2, fallbackTemperature),
     maxOutputTokens: clampInteger(values.maxOutputTokens, 64, 16000, fallbackMaxOutputTokens),
@@ -38,7 +46,8 @@ export function parseStoredControlSettings(raw, fallback = {}) {
 
 export function controlSettingsEqual(a, b) {
   if (!a || !b) return false;
-  return Number(a.maxTurns) === Number(b.maxTurns)
+  return a.conversationMode === b.conversationMode
+    && Number(a.maxTurns) === Number(b.maxTurns)
     && Number(a.temperature) === Number(b.temperature)
     && Number(a.maxOutputTokens) === Number(b.maxOutputTokens)
     && a.startSpeaker === b.startSpeaker;

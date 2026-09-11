@@ -151,6 +151,7 @@ export function getPublicConfig() {
     },
     defaults: {
       sharedPrompt: DEFAULT_SHARED_PROMPT,
+      conversationMode: 'turns',
       maxTurns: 20,
       temperature: 0.8,
       maxOutputTokens: 1200,

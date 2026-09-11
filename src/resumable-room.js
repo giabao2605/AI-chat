@@ -70,6 +70,7 @@ function sanitizeHistory(history, agentConfigs) {
       : speaker === 'tool'
         ? 'Image Generator'
         : agentConfigs[speaker]?.name || `Agent ${speaker.toUpperCase()}`;
+    const requestedBy = ['a', 'b'].includes(item?.requestedBy) ? item.requestedBy : undefined;
     return {
       id: safeText(item?.id, 200) || randomUUID(),
       speaker,
@@ -79,6 +80,7 @@ function sanitizeHistory(history, agentConfigs) {
       usage: sanitizeUsage(item?.usage),
       sources: sanitizeSources(item?.sources),
       attachments: sanitizeAttachments(item?.attachments),
+      ...(requestedBy ? { requestedBy } : {}),
     };
   }).filter(Boolean);
 }
@@ -142,6 +144,10 @@ export class ResumableConversationRoom extends ConversationRoom {
     }
 
     const fallbackSpeaker = ['a', 'b'].includes(input.startSpeaker) ? input.startSpeaker : 'a';
+    const savedMode = session.conversationMode === 'parallel' ? 'parallel' : null;
+    const requestedMode = input.conversationMode === 'parallel' ? 'parallel' : 'turns';
+
+    this.resetExecutionState();
     this.runId = safeText(session.runId, 200) || randomUUID();
     this.status = 'running';
     this.topic = topic;
@@ -149,13 +155,13 @@ export class ResumableConversationRoom extends ConversationRoom {
     this.maxTurns = targetMaxTurns;
     this.history = history;
     this.stats = sanitizeStats(session.stats, history);
-    this.currentSpeaker = null;
-    this.abortController = null;
     this.endedBy = null;
     this.endReason = '';
     this.visionFallbackWarned = { a: false, b: false };
+    this.toolFallbackWarned = { a: false, b: false };
     this.settings = {
       topicMode: 'manual',
+      conversationMode: savedMode || requestedMode,
       sharedPrompt: safeText(input.sharedPrompt, 30000) || DEFAULT_SHARED_PROMPT,
       personaA: safeText(input.personaA, 10000),
       personaB: safeText(input.personaB, 10000),
@@ -170,10 +176,11 @@ export class ResumableConversationRoom extends ConversationRoom {
     };
 
     this.emit('topic', { topic: this.topic });
-    this.emit('meta', { text: `Đã tiếp tục phiên cũ tại lượt ${usedTurns}/${targetMaxTurns}.` });
+    this.emit('meta', { text: `Đã tiếp tục phiên cũ tại lượt ${usedTurns}/${targetMaxTurns}${this.isParallelMode() ? ' ở chế độ song song' : ''}.` });
     this.emitState();
     const activeRunId = this.runId;
-    void this.runLoop(activeRunId);
+    if (this.isParallelMode()) this.startParallelMode(activeRunId);
+    else void this.runLoop(activeRunId);
     return this.snapshot();
   }
 }

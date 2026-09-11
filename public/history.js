@@ -11,6 +11,7 @@ export function createHistoryRecord(snapshot, savedAt = new Date().toISOString()
     runId: snapshot.runId,
     topic: snapshot.topic,
     status: snapshot.status || 'unknown',
+    conversationMode: snapshot.conversationMode === 'parallel' ? 'parallel' : 'turns',
     turn: Number(snapshot.turn || 0),
     maxTurns: Number(snapshot.maxTurns || 0),
     history: clone(snapshot.history),

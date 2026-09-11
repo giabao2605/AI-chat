@@ -8,6 +8,7 @@ test('control settings use a stable versioned localStorage key', () => {
 
 test('createControlSettings preserves valid user tuning', () => {
   const value = createControlSettings({
+    conversationMode: 'parallel',
     maxTurns: 42,
     temperature: 1.3,
     maxOutputTokens: 4096,
@@ -15,6 +16,7 @@ test('createControlSettings preserves valid user tuning', () => {
   }, {}, '2026-09-11T03:00:00.000Z');
 
   assert.deepEqual(value, {
+    conversationMode: 'parallel',
     maxTurns: 42,
     temperature: 1.3,
     maxOutputTokens: 4096,
@@ -23,7 +25,7 @@ test('createControlSettings preserves valid user tuning', () => {
   });
 });
 
-test('stored control settings survive changed app defaults', () => {
+test('stored control settings survive changed app defaults and old records default to turns mode', () => {
   const raw = JSON.stringify({
     maxTurns: 35,
     temperature: 0.4,
@@ -33,12 +35,14 @@ test('stored control settings survive changed app defaults', () => {
   });
 
   const restored = parseStoredControlSettings(raw, {
+    conversationMode: 'turns',
     maxTurns: 99,
     temperature: 1.8,
     maxOutputTokens: 9000,
     startSpeaker: 'random',
   });
 
+  assert.equal(restored.conversationMode, 'turns');
   assert.equal(restored.maxTurns, 35);
   assert.equal(restored.temperature, 0.4);
   assert.equal(restored.maxOutputTokens, 3000);
@@ -46,7 +50,8 @@ test('stored control settings survive changed app defaults', () => {
 });
 
 test('invalid values are clamped and corrupt storage fails closed', () => {
-  const value = createControlSettings({ maxTurns: 999, temperature: -2, maxOutputTokens: 2, startSpeaker: 'x' });
+  const value = createControlSettings({ conversationMode: 'chaos', maxTurns: 999, temperature: -2, maxOutputTokens: 2, startSpeaker: 'x' });
+  assert.equal(value.conversationMode, 'turns');
   assert.equal(value.maxTurns, 200);
   assert.equal(value.temperature, 0);
   assert.equal(value.maxOutputTokens, 64);
@@ -55,10 +60,10 @@ test('invalid values are clamped and corrupt storage fails closed', () => {
   assert.equal(parseStoredControlSettings(JSON.stringify({ maxTurns: 10 })), null);
 });
 
-test('controlSettingsEqual ignores savedAt', () => {
-  const a = createControlSettings({ maxTurns: 20, temperature: 0.8, maxOutputTokens: 1200, startSpeaker: 'random' }, {}, 'a');
-  const b = createControlSettings({ maxTurns: 20, temperature: 0.8, maxOutputTokens: 1200, startSpeaker: 'random' }, {}, 'b');
-  const c = createControlSettings({ maxTurns: 21, temperature: 0.8, maxOutputTokens: 1200, startSpeaker: 'random' }, {}, 'c');
+test('controlSettingsEqual ignores savedAt but includes conversation mode', () => {
+  const a = createControlSettings({ conversationMode: 'turns', maxTurns: 20, temperature: 0.8, maxOutputTokens: 1200, startSpeaker: 'random' }, {}, 'a');
+  const b = createControlSettings({ conversationMode: 'turns', maxTurns: 20, temperature: 0.8, maxOutputTokens: 1200, startSpeaker: 'random' }, {}, 'b');
+  const c = createControlSettings({ conversationMode: 'parallel', maxTurns: 20, temperature: 0.8, maxOutputTokens: 1200, startSpeaker: 'random' }, {}, 'c');
   assert.equal(controlSettingsEqual(a, b), true);
   assert.equal(controlSettingsEqual(a, c), false);
 });

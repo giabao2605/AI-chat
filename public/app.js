@@ -8,7 +8,7 @@ const els = {
   agentATotal: $('agentATotal'), agentBTotal: $('agentBTotal'), agentAInput: $('agentAInput'), agentBInput: $('agentBInput'), agentAOutput: $('agentAOutput'), agentBOutput: $('agentBOutput'),
   agentAEstimate: $('agentAEstimate'), agentBEstimate: $('agentBEstimate'), combinedTotal: $('combinedTotal'), turnCounter: $('turnCounter'), topicPreview: $('topicPreview'),
   liveHint: $('liveHint'), pauseBtn: $('pauseBtn'), stopBtn: $('stopBtn'), resetBtn: $('resetBtn'), startBtn: $('startBtn'),
-  topicMode: $('topicMode'), topicField: $('topicField'), topic: $('topic'), maxTurns: $('maxTurns'), startSpeaker: $('startSpeaker'), temperature: $('temperature'), maxOutputTokens: $('maxOutputTokens'), autoStart: $('autoStart'),
+  conversationMode: $('conversationMode'), topicMode: $('topicMode'), topicField: $('topicField'), topic: $('topic'), maxTurns: $('maxTurns'), startSpeaker: $('startSpeaker'), temperature: $('temperature'), maxOutputTokens: $('maxOutputTokens'), autoStart: $('autoStart'),
   sharedPrompt: $('sharedPrompt'), personaA: $('personaA'), personaB: $('personaB'), configWarning: $('configWarning'),
   userForm: $('userForm'), userInput: $('userInput'), sendBtn: $('sendBtn'), toast: $('toast'),
   historyBtn: $('historyBtn'), historyCount: $('historyCount'), historyDrawer: $('historyDrawer'), historyBackdrop: $('historyBackdrop'), closeHistoryBtn: $('closeHistoryBtn'), historyList: $('historyList'), clearHistoryBtn: $('clearHistoryBtn'),
@@ -237,7 +237,8 @@ function renderHistoryList() {
     const meta = document.createElement('div');
     meta.className = 'history-meta';
     const total = (session.stats?.a?.totalTokens || 0) + (session.stats?.b?.totalTokens || 0);
-    meta.textContent = `${formatDate(session.savedAt)} · ${historyStatusLabel(session.status)} · ${session.history.length} tin · ${formatNumber(total)} token`;
+    const modeLabel = session.conversationMode === 'parallel' ? 'Song song' : 'Theo lượt';
+    meta.textContent = `${formatDate(session.savedAt)} · ${modeLabel} · ${historyStatusLabel(session.status)} · ${session.history.length} tin · ${formatNumber(total)} token`;
     item.append(top, meta);
     const open = () => openHistorySession(session.runId);
     item.addEventListener('click', open);
@@ -302,6 +303,13 @@ function updateComposerState() {
   els.userForm.dataset.mode = mode.action;
 }
 
+function activeSpeakerNames(next) {
+  const ids = Array.isArray(next?.currentSpeakers) && next.currentSpeakers.length
+    ? next.currentSpeakers
+    : (next?.currentSpeaker ? [next.currentSpeaker] : []);
+  return ids.map((id) => config?.agents?.[id]?.name || id);
+}
+
 function applyState(next, { history = false } = {}) {
   state = next;
   saveCurrentSnapshot(next);
@@ -316,9 +324,10 @@ function applyState(next, { history = false } = {}) {
   const completedHint = next.endedBy && ['a', 'b'].includes(next.endedBy)
     ? `${config?.agents?.[next.endedBy]?.name || 'AI'} đã kết thúc phiên.`
     : 'Phiên đã hoàn thành.';
-  els.liveHint.textContent = next.currentSpeaker
-    ? `${config?.agents?.[next.currentSpeaker]?.name || next.currentSpeaker} đang trả lời...`
-    : ({ idle: 'Chưa bắt đầu phiên.', starting: 'Đang chuẩn bị phiên...', paused: 'Đã tạm dừng.', pausing: 'Sẽ tạm dừng sau lượt hiện tại.', stopped: 'Phiên đã dừng.', completed: completedHint, error: 'Phiên gặp lỗi.' }[next.status] || 'Sẵn sàng.');
+  const speakingNames = activeSpeakerNames(next);
+  els.liveHint.textContent = speakingNames.length
+    ? `${speakingNames.join(' và ')} đang trả lời${next.conversationMode === 'parallel' && speakingNames.length > 1 ? ' song song' : ''}...`
+    : ({ idle: 'Chưa bắt đầu phiên.', starting: 'Đang chuẩn bị phiên...', paused: 'Đã tạm dừng.', pausing: 'Sẽ tạm dừng sau các lượt đang chạy.', stopped: 'Phiên đã dừng.', completed: completedHint, error: 'Phiên gặp lỗi.' }[next.status] || 'Sẵn sàng.');
   updateComposerState();
   if (!viewingHistoryId) {
     els.topicPreview.textContent = next.topic || 'Chưa có chủ đề.';
@@ -351,6 +360,7 @@ async function load() {
   els.agentAModel.textContent = config.agents.a.model || 'chưa cấu hình';
   els.agentBModel.textContent = config.agents.b.model || 'chưa cấu hình';
   els.sharedPrompt.value = config.defaults.sharedPrompt;
+  if (els.conversationMode) els.conversationMode.value = config.defaults.conversationMode || 'turns';
   els.maxTurns.value = config.defaults.maxTurns;
   els.temperature.value = config.defaults.temperature;
   els.maxOutputTokens.value = config.defaults.maxOutputTokens;
@@ -432,6 +442,7 @@ function connectEvents() {
 function buildStartPayload(topicMode, topic) {
   return {
     topicMode,
+    conversationMode: els.conversationMode?.value || 'turns',
     topic,
     maxTurns: Number(els.maxTurns.value),
     startSpeaker: els.startSpeaker.value,
