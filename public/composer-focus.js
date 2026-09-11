@@ -1,3 +1,5 @@
+import './markdown-ui.js';
+
 const form = document.getElementById('userForm');
 const input = document.getElementById('userInput');
 
