@@ -93,6 +93,14 @@ export function getImageGenConfig() {
   };
 }
 
+export function getImageInputConfig() {
+  return {
+    enabled: boolFromEnv('MODEL_IMAGE_INPUT_ENABLED', true),
+    maxImages: Math.max(0, Math.min(4, intFromEnv('MODEL_IMAGE_MAX_ATTACHMENTS', 1))),
+    maxBytes: Math.max(1024 * 1024, Math.min(25 * 1024 * 1024, intFromEnv('MODEL_IMAGE_MAX_BYTES', 8 * 1024 * 1024))),
+  };
+}
+
 export function getServerConfig() {
   return {
     host: process.env.HOST || '127.0.0.1',
@@ -106,6 +114,7 @@ export function getPublicConfig() {
   const b = getAgentConfig('b');
   const webSearch = getWebSearchConfig();
   const imageGen = getImageGenConfig();
+  const imageInput = getImageInputConfig();
   return {
     agents: {
       a: { id: 'a', name: a.name, model: a.model, baseUrl: a.baseUrl, configured: Boolean(a.apiKey && a.model && a.baseUrl) },
@@ -123,6 +132,10 @@ export function getPublicConfig() {
       configured: imageGen.configured,
       model: imageGen.model,
       size: imageGen.size,
+    },
+    imageInput: {
+      enabled: imageInput.enabled,
+      maxImages: imageInput.maxImages,
     },
     defaults: {
       sharedPrompt: DEFAULT_SHARED_PROMPT,
