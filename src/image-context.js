@@ -33,9 +33,15 @@ export async function localImageToDataUrl(publicDir, publicUrl, maxBytes = 8 * 1
   return `data:${mime};base64,${bytes.toString('base64')}`;
 }
 
-export function createImageContextResolver({ publicDir, maxImages = 1, maxBytes = 8 * 1024 * 1024 } = {}) {
+export function createImageContextResolver({
+  publicDir,
+  maxImages = 1,
+  maxBytes = 8 * 1024 * 1024,
+  maxAiMessagesAfterImage = 1,
+} = {}) {
   const imageLimit = Math.max(0, Number(maxImages) || 0);
   const byteLimit = Math.max(1024 * 1024, Number(maxBytes) || 8 * 1024 * 1024);
+  const aiFreshnessLimit = Math.max(0, Number(maxAiMessagesAfterImage) || 0);
 
   return async function resolveImageContext(history = [], { afterIndex = -1 } = {}) {
     if (!imageLimit || !Array.isArray(history) || !history.length) return history;
@@ -52,19 +58,24 @@ export function createImageContextResolver({ publicDir, maxImages = 1, maxBytes 
       : 0;
 
     let remaining = imageLimit;
+    let aiMessagesAfter = 0;
     for (let i = cloned.length - 1; i >= startIndex && remaining > 0; i -= 1) {
       const item = cloned[i];
-      if (!Array.isArray(item.attachments)) continue;
-      for (let j = item.attachments.length - 1; j >= 0 && remaining > 0; j -= 1) {
-        const attachment = item.attachments[j];
-        if (attachment?.type !== 'image' || !String(attachment.url || '').startsWith('/generated/')) continue;
-        try {
-          attachment.dataUrl = await localImageToDataUrl(publicDir, attachment.url, byteLimit);
-          remaining -= 1;
-        } catch (error) {
-          attachment.visionError = error?.message || String(error);
+      if (aiMessagesAfter <= aiFreshnessLimit && Array.isArray(item.attachments)) {
+        for (let j = item.attachments.length - 1; j >= 0 && remaining > 0; j -= 1) {
+          const attachment = item.attachments[j];
+          if (attachment?.type !== 'image' || !String(attachment.url || '').startsWith('/generated/')) continue;
+          try {
+            attachment.dataUrl = await localImageToDataUrl(publicDir, attachment.url, byteLimit);
+            remaining -= 1;
+          } catch (error) {
+            attachment.visionError = error?.message || String(error);
+          }
         }
       }
+
+      if (item?.speaker === 'a' || item?.speaker === 'b') aiMessagesAfter += 1;
+      if (aiMessagesAfter > aiFreshnessLimit && remaining > 0) break;
     }
     return cloned;
   };
