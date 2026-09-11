@@ -124,13 +124,11 @@ function flushStream(messageId) {
   if (!node) return;
   node.frame = 0;
 
+  // Batch every delta that arrived during this animation frame, then paint all of it at once.
+  // This keeps DOM updates capped near 60 fps without intentionally slowing a fast provider.
   if (node.pending.length) {
-    const backlog = node.pending.length;
-    const chunkSize = backlog > 160 ? Math.min(64, Math.ceil(backlog * 0.32))
-      : backlog > 40 ? Math.min(28, Math.ceil(backlog * 0.38))
-        : Math.max(1, Math.min(12, Math.ceil(backlog * 0.5)));
-    node.rendered += node.pending.slice(0, chunkSize);
-    node.pending = node.pending.slice(chunkSize);
+    node.rendered += node.pending;
+    node.pending = '';
     node.bubble.textContent = node.rendered;
     if (followTail) scrollChat(true);
   }

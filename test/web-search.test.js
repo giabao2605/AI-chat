@@ -67,6 +67,47 @@ test('TavilyWebSearch uses basic searches, maps freshness and merges multiple qu
   assert.deepEqual(result.queries, ['query one', 'query two']);
 });
 
+test('TavilyWebSearch starts independent queries concurrently', async () => {
+  const requests = [];
+  const releases = [];
+  const fetchImpl = (url, options) => new Promise((resolve) => {
+    const body = JSON.parse(options.body);
+    requests.push(body.query);
+    releases.push(() => resolve(new Response(JSON.stringify({
+      results: [{ title: body.query, url: `https://example.com/${encodeURIComponent(body.query)}`, content: body.query, score: 0.8 }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } })));
+  });
+
+  const search = new TavilyWebSearch({ apiKey: 'test-key', maxQueries: 2, fetchImpl });
+  const pending = search.searchMany({ queries: ['first', 'second'] });
+
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(requests, ['first', 'second']);
+
+  for (const release of releases) release();
+  const result = await pending;
+  assert.equal(result.sources.length, 2);
+});
+
+test('TavilyWebSearch keeps useful partial results when one parallel query fails', async () => {
+  const search = new TavilyWebSearch({
+    apiKey: 'test-key',
+    maxQueries: 2,
+    fetchImpl: async (url, options) => {
+      const body = JSON.parse(options.body);
+      if (body.query === 'broken') return new Response('bad request', { status: 400 });
+      return new Response(JSON.stringify({
+        results: [{ title: 'Good', url: 'https://example.org/good', content: 'usable evidence', score: 0.9 }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+
+  const result = await search.searchMany({ queries: ['broken', 'working'] });
+  assert.equal(result.sources.length, 1);
+  assert.equal(result.sources[0].title, 'Good');
+});
+
 test('TavilyWebSearch does not retry plan/quota errors', async () => {
   let calls = 0;
   const search = new TavilyWebSearch({
