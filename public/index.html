@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/layout-v2.css" />
   <link rel="stylesheet" href="/ui-v3.css" />
   <link rel="stylesheet" href="/chat-v4.css" />
+  <link rel="stylesheet" href="/research-status.css" />
 </head>
 <body>
   <div class="app-shell">
@@ -20,6 +21,7 @@
           <div>
             <p id="liveHint">Chưa bắt đầu phiên.</p>
             <div id="topicPreview" class="topic-inline">Chưa có chủ đề.</div>
+            <div id="researchStatus" class="research-status hidden" aria-live="polite"></div>
           </div>
           <div class="toolbar-actions"><button id="pauseBtn" class="button ghost" disabled>Tạm dừng</button><button id="stopBtn" class="button danger" disabled>Dừng</button></div>
         </div>
@@ -119,5 +121,6 @@
   <div id="toast" class="toast" role="status"></div>
   <script type="module" src="/prompt-ui.js"></script>
   <script type="module" src="/app.js"></script>
+  <script type="module" src="/research-status.js"></script>
 </body>
 </html>
