@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { decideConversationEnd, explicitStopRequested, parseConversationEndDecision } from '../src/conversation-end.js';
 import { ConversationRoom } from '../src/orchestrator.js';
 
+process.env.AGENT_AUTO_END_ENABLED = 'true';
+
 test('conversation end parser accepts strict JSON and fails closed', () => {
   assert.deepEqual(parseConversationEndDecision('```json\n{"end":true,"reason":"đã hội tụ"}\n```'), {
     end: true,

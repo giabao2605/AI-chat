@@ -2,6 +2,11 @@ function safeText(value, maxLength = 6000) {
   return String(value ?? '').trim().slice(0, maxLength);
 }
 
+export function agentAutoEndEnabled() {
+  const raw = String(process.env.AGENT_AUTO_END_ENABLED ?? '').trim().toLowerCase();
+  return ['1', 'true', 'yes', 'on'].includes(raw);
+}
+
 export function parseConversationEndDecision(text) {
   const raw = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
   const start = raw.indexOf('{');
@@ -33,6 +38,11 @@ function countAiMessages(history) {
 }
 
 export async function decideConversationEnd({ provider, topic, history = [], agentId, agentName = 'AI', signal } = {}) {
+  // Feature is intentionally off by default. Set AGENT_AUTO_END_ENABLED=true to restore it later.
+  if (!agentAutoEndEnabled()) {
+    return { end: false, reason: 'auto-end-disabled', usage: null };
+  }
+
   // If a user message arrived after this agent finished, leave it for the next agent to answer.
   if (history.at(-1)?.speaker !== agentId) {
     return { end: false, reason: 'new-message-pending', usage: null };

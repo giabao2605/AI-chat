@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAgentConfig, getPublicConfig, getServerConfig, getWebSearchConfig } from './config.js';
-import { ConversationRoom } from './orchestrator.js';
+import { ResumableConversationRoom } from './resumable-room.js';
 import { TavilyWebSearch } from './web-search.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -11,7 +11,7 @@ const publicDir = normalize(join(__dirname, '..', 'public'));
 const serverConfig = getServerConfig();
 const webSearchConfig = getWebSearchConfig();
 const webSearch = webSearchConfig.enabled ? new TavilyWebSearch(webSearchConfig) : null;
-const room = new ConversationRoom({
+const room = new ResumableConversationRoom({
   agentA: getAgentConfig('a'),
   agentB: getAgentConfig('b'),
   hardTurnLimit: serverConfig.hardTurnLimit,
@@ -84,6 +84,10 @@ async function handleApi(req, res, pathname) {
 
   if (pathname === '/api/start') {
     const state = await room.start(body);
+    return json(res, 200, state);
+  }
+  if (pathname === '/api/continue') {
+    const state = await room.continueFromHistory(body);
     return json(res, 200, state);
   }
   if (pathname === '/api/pause') {
