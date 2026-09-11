@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildWebResearchContext, decideWebResearch, getForcedResearchPlan, parseResearchPlan } from '../src/research.js';
+import { buildWebResearchContext, decideWebResearch, getFastNoResearchPlan, getForcedResearchPlan, parseResearchPlan } from '../src/research.js';
 import { ConversationRoom } from '../src/orchestrator.js';
 
 test('research plan parser accepts JSON and fails closed on malformed output', () => {
@@ -61,6 +61,27 @@ test('weather topic also forces research when the room starts without transcript
   assert.equal(plan.search, true);
   assert.equal(plan.forced, true);
   assert.equal(plan.freshness, 'pd');
+});
+
+test('ordinary conversation skips the hidden research planner entirely', async () => {
+  let plannerCalls = 0;
+  const provider = {
+    async streamChat() {
+      plannerCalls += 1;
+      throw new Error('ordinary chat should not invoke research planner');
+    },
+  };
+  const history = [{ speaker: 'user', name: 'Bạn', text: 'Theo bạn nếu con người sống 200 năm thì xã hội sẽ thay đổi thế nào?' }];
+  const fast = getFastNoResearchPlan('Tuổi thọ con người', history);
+  assert.equal(fast.search, false);
+  assert.equal(fast.fastPath, true);
+
+  const plan = await decideWebResearch({ provider, topic: 'Tuổi thọ con người', history, agentName: 'Agent A' });
+  assert.equal(plan.search, false);
+  assert.equal(plan.fastPath, true);
+  assert.equal(plan.reason, 'deterministic-no-research');
+  assert.equal(plan.usage, null);
+  assert.equal(plannerCalls, 0);
 });
 
 test('research planner still handles ambiguous cases with a compact hidden model call', async () => {
