@@ -49,12 +49,13 @@ if (historyList && banner && returnLiveBtn && maxTurnsInput && roomStatus) {
     queueMicrotask(refresh);
   }
 
-  function statusMessage(plan) {
+  function statusMessage(plan, session) {
     if (plan.reason === 'live-room-active') return 'Dừng phiên hiện tại trước khi tiếp tục phiên cũ.';
     if (plan.reason === 'limit-reached') return `Đã dùng ${plan.usedTurns}/${plan.maxTurns} lượt. Tăng “Số lượt” lên ít nhất ${plan.requiredMinTurns}.`;
     if (plan.reason === 'not-resumable') return 'Phiên này chưa ở trạng thái có thể tiếp tục.';
-    if (plan.extended) return `${plan.usedTurns}/${plan.maxTurns} lượt · còn ${plan.remainingTurns} lượt sau khi tăng trần.`;
-    return `${plan.usedTurns}/${plan.maxTurns} lượt · còn ${plan.remainingTurns} lượt.`;
+    const mode = session?.conversationMode === 'parallel' ? 'song song' : 'theo lượt';
+    if (plan.extended) return `${mode} · ${plan.usedTurns}/${plan.maxTurns} lượt · còn ${plan.remainingTurns} lượt sau khi tăng trần.`;
+    return `${mode} · ${plan.usedTurns}/${plan.maxTurns} lượt · còn ${plan.remainingTurns} lượt.`;
   }
 
   function refresh() {
@@ -72,7 +73,7 @@ if (historyList && banner && returnLiveBtn && maxTurnsInput && roomStatus) {
     });
     resumeBtn.disabled = submitting || !plan.canResume;
     resumeBtn.textContent = submitting ? 'Đang tiếp tục…' : 'Tiếp tục';
-    info.textContent = statusMessage(plan);
+    info.textContent = statusMessage(plan, session);
   }
 
   async function continueSession() {
@@ -96,6 +97,7 @@ if (historyList && banner && returnLiveBtn && maxTurnsInput && roomStatus) {
         body: JSON.stringify({
           session,
           maxTurns: plan.maxTurns,
+          conversationMode: session.conversationMode || $('conversationMode')?.value || 'turns',
           startSpeaker: $('startSpeaker')?.value || 'a',
           temperature: Number($('temperature')?.value),
           maxOutputTokens: Number($('maxOutputTokens')?.value),
