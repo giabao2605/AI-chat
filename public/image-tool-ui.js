@@ -1,6 +1,7 @@
 import { HISTORY_STORAGE_KEY } from './history.js';
+import { IMAGE_COMMAND, parseImageCommand, shouldSuggestImageCommand } from './image-command.js';
 
-const COMMAND = '/img_gen';
+const COMMAND = IMAGE_COMMAND;
 const form = document.getElementById('userForm');
 const input = document.getElementById('userInput');
 const chat = document.getElementById('chat');
@@ -10,15 +11,6 @@ let imageToolEnabled = false;
 let imageToolConfigured = false;
 let imagePending = false;
 let toastTimer;
-
-export function parseImageCommand(value) {
-  const raw = String(value || '').trim();
-  if (!/^\/img_gen(?:\s|$)/i.test(raw)) return { matched: false, prompt: '' };
-  return {
-    matched: true,
-    prompt: raw.replace(/^\/img_gen\s*/i, '').trim(),
-  };
-}
 
 function ensureStylesheet() {
   if (document.querySelector('link[data-image-tool-style]')) return;
@@ -59,13 +51,6 @@ function setMenuAvailability(menu) {
   if (!item || !state) return;
   item.disabled = !imageToolEnabled;
   state.textContent = imageToolEnabled ? 'Sẵn sàng' : (imageToolConfigured ? 'Đang tắt' : 'Chưa cấu hình');
-}
-
-function shouldShowMenu(value) {
-  const raw = String(value || '').trimStart();
-  if (!raw.startsWith('/')) return false;
-  if (/^\/img_gen\s+/i.test(raw)) return false;
-  return COMMAND.startsWith(raw.toLowerCase()) || raw.toLowerCase().startsWith(COMMAND);
 }
 
 function openMenu(menu) {
@@ -172,6 +157,15 @@ function scheduleDecorate(entry, attempt = 0) {
   if (attempt < 12) setTimeout(() => scheduleDecorate(entry, attempt + 1), 50 + attempt * 25);
 }
 
+function escapeText(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 function createPendingMessage(prompt) {
   if (!chat) return null;
   chat.querySelector('.empty-state')?.remove();
@@ -186,15 +180,6 @@ function createPendingMessage(prompt) {
   chat.append(article);
   chat.scrollTop = chat.scrollHeight;
   return article;
-}
-
-function escapeText(value) {
-  return String(value || '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
 }
 
 async function runImageCommand(prompt) {
@@ -254,7 +239,7 @@ if (form && input) {
   setupHistoryDecoration();
 
   input.addEventListener('input', () => {
-    if (shouldShowMenu(input.value)) openMenu(menu);
+    if (shouldSuggestImageCommand(input.value)) openMenu(menu);
     else closeMenu(menu);
   });
 
