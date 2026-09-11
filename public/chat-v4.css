@@ -1,0 +1,151 @@
+:root,
+html,
+body,
+button,
+input,
+textarea,
+select {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+}
+
+.chat-toolbar,
+.control-panel,
+.history-drawer,
+.composer,
+.message,
+.bubble,
+.message-meta {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+}
+
+.chat {
+  padding: 30px clamp(26px, 3.4vw, 58px) 38px;
+}
+
+.message {
+  width: min(calc(100% - 12px), 1280px);
+  margin-bottom: 34px;
+  align-items: flex-start;
+}
+
+.message.a {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+.message.b {
+  flex-direction: row-reverse;
+  margin-left: auto;
+  margin-right: 0;
+}
+
+.message.a .message-body,
+.message.b .message-body {
+  width: min(78%, 980px);
+  max-width: none;
+  padding: 4px 0 4px 14px;
+}
+
+.message.a .message-body {
+  border-left: 2px solid rgba(119, 168, 255, .2);
+}
+
+.message.b .message-body {
+  padding: 4px 14px 4px 0;
+  border-right: 2px solid rgba(178, 140, 255, .22);
+  text-align: left;
+}
+
+.message.b .message-meta {
+  justify-content: flex-end;
+}
+
+.message-meta {
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+
+.message-meta b {
+  font-size: 12px;
+  letter-spacing: -.01em;
+}
+
+.message.a .bubble,
+.message.b .bubble {
+  width: 100%;
+  font-size: 15.75px;
+  line-height: 1.74;
+  letter-spacing: -.006em;
+  color: #edf1f6;
+}
+
+.message.user {
+  width: min(calc(100% - 12px), 1180px);
+  margin-left: auto;
+  margin-right: 0;
+}
+
+.message.user .message-body {
+  width: auto;
+  max-width: min(760px, 72%);
+}
+
+.message.user .bubble {
+  font-size: 15px;
+  line-height: 1.62;
+}
+
+.avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  font-size: 10px;
+}
+
+@media (min-width: 1500px) {
+  .message {
+    width: min(calc(100% - 28px), 1380px);
+  }
+
+  .message.a .message-body,
+  .message.b .message-body {
+    width: min(80%, 1040px);
+  }
+
+  .message.a .bubble,
+  .message.b .bubble {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .message.a .message-body,
+  .message.b .message-body {
+    width: calc(100% - 46px);
+  }
+}
+
+@media (max-width: 620px) {
+  .chat {
+    padding: 22px 14px 30px;
+  }
+
+  .message,
+  .message.user {
+    width: 100%;
+    margin-bottom: 26px;
+  }
+
+  .message.a .message-body,
+  .message.b .message-body,
+  .message.user .message-body {
+    width: calc(100% - 42px);
+    max-width: calc(100% - 42px);
+  }
+
+  .message.a .bubble,
+  .message.b .bubble {
+    font-size: 15px;
+    line-height: 1.68;
+  }
+}
