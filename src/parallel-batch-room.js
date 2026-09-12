@@ -1,6 +1,6 @@
 import { MultiAgentRoom } from './multi-agent-room.js';
 
-const PARALLEL_BATCH_DELAY_MS = 350;
+const PARALLEL_REPLY_COOLDOWN_MS = 80;
 
 function nowIso(ms = Date.now()) {
   return new Date(ms).toISOString();
@@ -13,14 +13,14 @@ function terminalStatus(status) {
 function cloneAgentState(value = {}) {
   return {
     status: value.status || 'idle',
-    batchId: value.batchId || null,
-    batchNumber: value.batchNumber || null,
     messageId: value.messageId || null,
     error: value.error || '',
     updatedAt: value.updatedAt || null,
   };
 }
 
+// Kept under the old class name for compatibility with ProfiledRoom/server imports.
+// Runtime semantics are now free-running: there is no round/batch barrier.
 export class ParallelBatchRoom extends MultiAgentRoom {
   constructor(options = {}) {
     super(options);
@@ -31,21 +31,19 @@ export class ParallelBatchRoom extends MultiAgentRoom {
     if (!(this.parallelMessageMeta instanceof Map)) this.parallelMessageMeta = new Map();
     if (!this.parallelAgentStates || typeof this.parallelAgentStates !== 'object') this.parallelAgentStates = {};
     if (!Array.isArray(this.parallelBaseOrder)) this.parallelBaseOrder = [];
-    if (!Number.isFinite(this.parallelBatchNumber)) this.parallelBatchNumber = 0;
     if (!Number.isFinite(this.parallelStartSequence)) this.parallelStartSequence = 0;
-    if (!('parallelBatch' in this)) this.parallelBatch = null;
-    if (!('parallelPendingSchedule' in this)) this.parallelPendingSchedule = false;
+    if (!Number.isFinite(this.parallelScheduleCursor)) this.parallelScheduleCursor = 0;
+    if (!Number.isFinite(this.parallelReservedTurns)) this.parallelReservedTurns = 0;
     for (const id of this.agentIds || []) {
       if (!this.parallelAgentStates[id]) this.parallelAgentStates[id] = cloneAgentState();
     }
   }
 
   resetParallelRuntime() {
-    this.parallelBatch = null;
-    this.parallelBatchNumber = 0;
     this.parallelStartSequence = 0;
+    this.parallelScheduleCursor = 0;
+    this.parallelReservedTurns = 0;
     this.parallelBaseOrder = [];
-    this.parallelPendingSchedule = false;
     this.parallelMessageMeta = new Map();
     this.parallelAgentStates = Object.fromEntries((this.agentIds || []).map((id) => [id, cloneAgentState()]));
   }
@@ -68,20 +66,15 @@ export class ParallelBatchRoom extends MultiAgentRoom {
   snapshot() {
     const base = super.snapshot();
     this.ensureParallelRuntime();
-    const batch = this.parallelBatch;
     return {
       ...base,
-      parallelBatch: batch ? {
-        id: batch.id,
-        number: batch.number,
-        status: batch.status,
-        agents: [...batch.agents],
-        startedAt: batch.startedAt,
-        finishedAt: batch.finishedAt || null,
-        successes: batch.successes || 0,
-        failures: batch.failures || 0,
-        settled: batch.settled || 0,
-      } : null,
+      // Legacy field intentionally stays null so old clients do not infer rounds.
+      parallelBatch: null,
+      parallelScheduler: {
+        mode: 'free',
+        reservedTurns: this.parallelReservedTurns,
+        startSequence: this.parallelStartSequence,
+      },
       agentStates: Object.fromEntries((this.agentIds || []).map((id) => [id, cloneAgentState(this.parallelAgentStates[id])])),
     };
   }
@@ -95,30 +88,31 @@ export class ParallelBatchRoom extends MultiAgentRoom {
       } else if ((eventName === 'research:done' || eventName === 'research:error') && this.agentIds.includes(speaker)) {
         this.setParallelAgentState(speaker, 'thinking', { error: eventName === 'research:error' ? payload.message || '' : '' });
       } else if (eventName === 'message:start' && this.agentIds.includes(speaker)) {
-        const runtime = this.agentRuntime?.[speaker] || {};
         const startedAtMs = Date.now();
         const meta = {
-          batchId: runtime.batchId || this.parallelBatch?.id || null,
-          batchNumber: runtime.batchNumber || this.parallelBatch?.number || null,
           startSequence: ++this.parallelStartSequence,
           startedAt: nowIso(startedAtMs),
           startedAtMs,
         };
         this.parallelMessageMeta.set(payload.id, meta);
         Object.assign(payload, meta);
-        this.setParallelAgentState(speaker, 'streaming', { messageId: payload.id });
+        this.setParallelAgentState(speaker, 'streaming', { messageId: payload.id, error: '' });
       } else if ((eventName === 'message:delta' || eventName === 'message:cancelled' || eventName === 'message:failed') && payload.id) {
         const meta = this.parallelMessageMeta.get(payload.id);
         if (meta) Object.assign(payload, meta);
-        if (eventName === 'message:cancelled' && this.agentIds.includes(speaker)) this.setParallelAgentState(speaker, 'cancelled', { messageId: payload.id });
-        if (eventName === 'message:failed' && this.agentIds.includes(speaker)) this.setParallelAgentState(speaker, 'failed', { messageId: payload.id, error: payload.message || '' });
+        if (eventName === 'message:cancelled' && this.agentIds.includes(speaker)) {
+          this.setParallelAgentState(speaker, 'cancelled', { messageId: payload.id, error: '' });
+        }
+        if (eventName === 'message:failed' && this.agentIds.includes(speaker)) {
+          this.setParallelAgentState(speaker, 'failed', { messageId: payload.id, error: payload.message || '' });
+        }
       } else if (eventName === 'message:done' && this.agentIds.includes(speaker)) {
         const meta = this.parallelMessageMeta.get(payload.id);
         if (meta) {
           Object.assign(payload, meta, { finishedAt: nowIso() });
           this.sortHistoryByTimeline();
         }
-        this.setParallelAgentState(speaker, 'done', { messageId: payload.id });
+        this.setParallelAgentState(speaker, 'done', { messageId: payload.id, error: '' });
       }
     }
     return super.emit(eventName, payload);
@@ -127,19 +121,20 @@ export class ParallelBatchRoom extends MultiAgentRoom {
   setParallelAgentState(agentId, status, extra = {}) {
     if (!this.agentIds?.includes(agentId)) return;
     this.ensureParallelRuntime();
-    const runtime = this.agentRuntime?.[agentId] || {};
     const previous = this.parallelAgentStates[agentId] || {};
     const next = {
       ...previous,
       status,
-      batchId: extra.batchId ?? runtime.batchId ?? this.parallelBatch?.id ?? previous.batchId ?? null,
-      batchNumber: extra.batchNumber ?? runtime.batchNumber ?? this.parallelBatch?.number ?? previous.batchNumber ?? null,
-      messageId: extra.messageId ?? previous.messageId ?? null,
-      error: extra.error ?? (['failed'].includes(status) ? previous.error || '' : ''),
+      messageId: Object.prototype.hasOwnProperty.call(extra, 'messageId') ? extra.messageId : (previous.messageId ?? null),
+      error: Object.prototype.hasOwnProperty.call(extra, 'error') ? extra.error : (status === 'failed' ? previous.error || '' : ''),
       updatedAt: nowIso(),
     };
     this.parallelAgentStates[agentId] = next;
-    super.emit('parallel:agent-status', { agentId, name: this.agentConfigs?.[agentId]?.name || agentId, ...cloneAgentState(next) });
+    super.emit('parallel:agent-status', {
+      agentId,
+      name: this.agentConfigs?.[agentId]?.name || agentId,
+      ...cloneAgentState(next),
+    });
   }
 
   sortHistoryByTimeline() {
@@ -159,6 +154,19 @@ export class ParallelBatchRoom extends MultiAgentRoom {
       .map(({ item }) => item);
   }
 
+  async executeAgentTurn(agentId, activeRunId = this.runId) {
+    const runtime = this.agentRuntime?.[agentId];
+    if (runtime) runtime.parallelSeenIds = new Set(this.history.map((item) => item?.id).filter(Boolean));
+    return super.executeAgentTurn(agentId, activeRunId);
+  }
+
+  hasUnseenParallelTrigger(agentId) {
+    const runtime = this.agentRuntime?.[agentId];
+    const seen = runtime?.parallelSeenIds;
+    if (!(seen instanceof Set)) return super.hasUnseenParallelTrigger(agentId);
+    return this.history.some((item) => item?.id && !seen.has(item.id) && this.parallelRelevantMessage(item, agentId));
+  }
+
   baseParallelOrder() {
     if (this.parallelBaseOrder.length) return this.parallelBaseOrder;
     const first = this.firstSpeaker();
@@ -167,156 +175,113 @@ export class ParallelBatchRoom extends MultiAgentRoom {
     return this.parallelBaseOrder;
   }
 
-  orderForBatch(number) {
+  nextSchedulingOrder() {
     const base = this.baseParallelOrder();
     if (!base.length) return [];
-    const shift = Math.max(0, number - 1) % base.length;
+    const shift = this.parallelScheduleCursor % base.length;
+    this.parallelScheduleCursor = (this.parallelScheduleCursor + 1) % base.length;
     return [...base.slice(shift), ...base.slice(0, shift)];
   }
 
   startParallelMode(activeRunId = this.runId) {
     this.ensureParallelRuntime();
     this.baseParallelOrder();
-    this.emit('meta', { text: `Chế độ song song theo round: ${this.agentIds.length} AI stream đồng thời; round sau chỉ bắt đầu khi round hiện tại đã kết thúc.` });
-    this.openParallelBatch(activeRunId);
+    this.emit('meta', {
+      text: `Chế độ song song tự do: ${this.agentIds.length} AI hoạt động độc lập; AI nào sẵn sàng có thể bắt đầu lượt mới mà không chờ các AI khác.`,
+    });
+    this.scheduleParallelAgents(activeRunId, { initial: true });
   }
 
-  scheduleParallelAgents(activeRunId = this.runId) {
-    this.openParallelBatch(activeRunId);
+  availableParallelSlots() {
+    return Math.max(0, this.maxTurns - this.turn - this.parallelReservedTurns);
   }
 
-  queueParallelSchedule(activeRunId = this.runId, delayMs = PARALLEL_BATCH_DELAY_MS) {
+  canStartParallelAgent(agentId, initial = false) {
+    if (!this.isParallelMode() || this.status !== 'running') return false;
+    const runtime = this.agentRuntime?.[agentId];
+    if (!runtime || runtime.running || runtime.parallelReserved) return false;
+    if (this.availableParallelSlots() <= 0) return false;
+    if (initial && this.history.length === 0) return true;
+    return this.hasUnseenParallelTrigger(agentId);
+  }
+
+  scheduleParallelAgents(activeRunId = this.runId, { initial = false } = {}) {
     if (activeRunId !== this.runId || !this.isParallelMode() || this.status !== 'running') return;
     this.ensureParallelRuntime();
-    if (this.parallelBatch) {
-      this.parallelPendingSchedule = true;
-      return;
+
+    for (const agentId of this.nextSchedulingOrder()) {
+      if (this.availableParallelSlots() <= 0) break;
+      if (!this.canStartParallelAgent(agentId, initial)) continue;
+      const runtime = this.agentRuntime?.[agentId];
+      if (!runtime) continue;
+      runtime.parallelReserved = true;
+      this.parallelReservedTurns += 1;
+      this.setParallelAgentState(agentId, 'queued', { messageId: null, error: '' });
+      void this.launchFreeParallelAgent(agentId, activeRunId);
     }
+
+    this.emitState();
+    this.completeAtLimit();
+  }
+
+  queueParallelSchedule(activeRunId = this.runId, delayMs = PARALLEL_REPLY_COOLDOWN_MS) {
+    if (activeRunId !== this.runId || !this.isParallelMode() || this.status !== 'running') return;
     this.clearParallelWakeTimer();
     this.parallelWakeTimer = setTimeout(() => {
       this.parallelWakeTimer = null;
-      this.openParallelBatch(activeRunId);
+      this.scheduleParallelAgents(activeRunId);
     }, Math.max(0, delayMs));
   }
 
-  openParallelBatch(activeRunId = this.runId) {
-    this.ensureParallelRuntime();
-    if (activeRunId !== this.runId || !this.isParallelMode() || this.status !== 'running' || this.parallelBatch) return;
-    if (this.turn >= this.maxTurns) {
-      this.completeAtLimit();
-      return;
-    }
+  async launchFreeParallelAgent(agentId, activeRunId = this.runId) {
+    let attempted = false;
+    let success = false;
+    let cancelled = false;
+    let errorMessage = '';
 
-    const remaining = Math.max(0, this.maxTurns - this.turn);
-    const number = ++this.parallelBatchNumber;
-    const agents = this.orderForBatch(number).slice(0, remaining);
-    if (!agents.length) {
-      this.completeAtLimit();
-      return;
-    }
-
-    const batch = {
-      id: `${this.runId}:parallel:${number}`,
-      number,
-      status: 'running',
-      agents,
-      startedAt: nowIso(),
-      finishedAt: null,
-      successes: 0,
-      failures: 0,
-      settled: 0,
-    };
-    this.parallelBatch = batch;
-    this.parallelPendingSchedule = false;
-
-    for (const agentId of agents) {
-      const runtime = this.agentRuntime?.[agentId];
-      if (runtime) {
-        runtime.batchId = batch.id;
-        runtime.batchNumber = batch.number;
-      }
-      this.setParallelAgentState(agentId, 'queued', { batchId: batch.id, batchNumber: batch.number, messageId: null, error: '' });
-    }
-
-    super.emit('parallel:batch', {
-      id: batch.id,
-      number: batch.number,
-      status: 'started',
-      agents: [...batch.agents],
-      startedAt: batch.startedAt,
-      remainingTurns: remaining,
-    });
-    this.recordDebug('parallel:batch-start', { batchId: batch.id, batchNumber: batch.number, agents: [...batch.agents], turn: this.turn });
-    this.emitState();
-
-    void Promise.all(agents.map((agentId) => this.runParallelBatchAgent(agentId, batch, activeRunId)))
-      .then((results) => this.finishParallelBatch(batch, activeRunId, results))
-      .catch((error) => {
-        this.recordDebug('parallel:batch-internal-error', { batchId: batch.id, message: error?.message || String(error) });
-        this.finishParallelBatch(batch, activeRunId, []);
-      });
-  }
-
-  async runParallelBatchAgent(agentId, batch, activeRunId) {
-    this.setParallelAgentState(agentId, 'thinking', { batchId: batch.id, batchNumber: batch.number, messageId: null, error: '' });
+    this.setParallelAgentState(agentId, 'thinking', { messageId: null, error: '' });
     try {
       const outcome = await this.executeAgentTurn(agentId, activeRunId);
-      if (activeRunId !== this.runId || terminalStatus(this.status)) return { agentId, attempted: false, success: false, cancelled: true };
-      if (outcome?.entry) {
-        this.setParallelAgentState(agentId, 'done', { batchId: batch.id, batchNumber: batch.number, messageId: outcome.entry.id });
-        return { agentId, attempted: true, success: true, entry: outcome.entry };
+      if (activeRunId !== this.runId || terminalStatus(this.status)) {
+        cancelled = true;
+      } else {
+        attempted = true;
+        success = Boolean(outcome?.entry);
+        if (success) this.setParallelAgentState(agentId, 'done', { messageId: outcome.entry.id, error: '' });
       }
-      return { agentId, attempted: true, success: false };
     } catch (error) {
-      const cancelled = error?.name === 'AbortError' || activeRunId !== this.runId || ['stopped', 'idle', 'completed'].includes(this.status);
+      cancelled = error?.name === 'AbortError'
+        || activeRunId !== this.runId
+        || ['stopped', 'idle', 'completed'].includes(this.status);
       if (cancelled) {
-        this.setParallelAgentState(agentId, 'cancelled', { batchId: batch.id, batchNumber: batch.number, error: '' });
-        return { agentId, attempted: false, success: false, cancelled: true };
+        this.setParallelAgentState(agentId, 'cancelled', { messageId: null, error: '' });
+      } else {
+        attempted = true;
+        errorMessage = error?.message || String(error);
+        this.setParallelAgentState(agentId, 'failed', { messageId: null, error: errorMessage });
+        this.recordDebug('parallel:agent-error', { agentId, message: errorMessage });
       }
-      const message = error?.message || String(error);
-      this.setParallelAgentState(agentId, 'failed', { batchId: batch.id, batchNumber: batch.number, error: message });
-      this.recordDebug('parallel:agent-error', { agentId, batchId: batch.id, batchNumber: batch.number, message });
-      return { agentId, attempted: true, success: false, error: message };
     } finally {
       const runtime = this.agentRuntime?.[agentId];
-      if (runtime) {
-        delete runtime.batchId;
-        delete runtime.batchNumber;
+      if (runtime?.parallelReserved) {
+        runtime.parallelReserved = false;
+        this.parallelReservedTurns = Math.max(0, this.parallelReservedTurns - 1);
       }
     }
-  }
 
-  finishParallelBatch(batch, activeRunId, results) {
-    if (activeRunId !== this.runId || this.parallelBatch?.id !== batch.id) return;
-    const attempted = results.filter((result) => result?.attempted).length;
-    const successes = results.filter((result) => result?.success).length;
-    const failures = results.filter((result) => result?.attempted && !result?.success).length;
-    batch.settled = results.length;
-    batch.successes = successes;
-    batch.failures = failures;
-    batch.status = 'completed';
-    batch.finishedAt = nowIso();
-
-    if (!['stopped', 'idle'].includes(this.status)) this.turn += attempted;
+    if (activeRunId !== this.runId) return;
+    if (attempted && !['stopped', 'idle'].includes(this.status)) this.turn += 1;
     this.sortHistoryByTimeline();
-
-    super.emit('parallel:batch', {
-      id: batch.id,
-      number: batch.number,
-      status: 'completed',
-      agents: [...batch.agents],
-      startedAt: batch.startedAt,
-      finishedAt: batch.finishedAt,
-      successes,
-      failures,
-      attempted,
+    this.recordDebug('parallel:agent-settled', {
+      agentId,
+      success,
+      cancelled,
+      error: errorMessage,
       turn: this.turn,
-      maxTurns: this.maxTurns,
+      reservedTurns: this.parallelReservedTurns,
     });
-    this.recordDebug('parallel:batch-done', { batchId: batch.id, batchNumber: batch.number, successes, failures, attempted, turn: this.turn });
-    this.parallelBatch = null;
 
-    if (this.status === 'pausing') {
+    if (this.status === 'pausing' && this.runningAgentCount() === 0 && this.parallelReservedTurns === 0) {
       this.status = 'paused';
       this.emitState();
       return;
@@ -325,6 +290,14 @@ export class ParallelBatchRoom extends MultiAgentRoom {
     this.emitState();
     if (this.status !== 'running') return;
     if (this.completeAtLimit()) return;
-    this.queueParallelSchedule(activeRunId, PARALLEL_BATCH_DELAY_MS);
+    this.queueParallelSchedule(activeRunId, PARALLEL_REPLY_COOLDOWN_MS);
+  }
+
+  completeAtLimit() {
+    if (this.status !== 'running'
+      || this.turn < this.maxTurns
+      || this.runningAgentCount() > 0
+      || this.parallelReservedTurns > 0) return false;
+    return super.completeAtLimit();
   }
 }

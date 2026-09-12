@@ -2,18 +2,17 @@ const $ = (id) => document.getElementById(id);
 
 const STATUS_LABELS = {
   idle: 'Chờ',
-  queued: 'Xếp hàng',
+  queued: 'Sắp trả lời',
   thinking: 'Đang nghĩ',
   researching: 'Đang tìm web',
   streaming: 'Đang trả lời',
-  done: 'Xong',
+  done: 'Sẵn sàng',
   failed: 'Lỗi',
   cancelled: 'Đã hủy',
 };
 
 let config = null;
 let state = null;
-let batch = null;
 let agentStates = {};
 let source = null;
 let panel = null;
@@ -43,7 +42,7 @@ function ensureUi() {
   panel.innerHTML = `
     <div class="parallel-live-head">
       <span class="parallel-live-pulse"></span>
-      <strong id="parallelLiveTitle">Song song</strong>
+      <strong id="parallelLiveTitle">Song song tự do</strong>
       <button id="parallelFollowLive" type="button" class="parallel-follow-live hidden">↓ Live</button>
     </div>
     <div id="parallelAgentChips" class="parallel-agent-chips"></div>
@@ -69,14 +68,14 @@ function currentAgentState(id) {
   return agentStates[id] || state?.agentStates?.[id] || { status: 'idle' };
 }
 
-function streamingCount() {
+function activeWorkCount() {
   return activeAgentIds().filter((id) => ['streaming', 'researching', 'thinking', 'queued'].includes(currentAgentState(id).status)).length;
 }
 
 function refreshFollowButton() {
   if (!followButton) return;
   const chat = $('chat');
-  const count = streamingCount();
+  const count = activeWorkCount();
   if (!chat || !count) {
     followButton.classList.add('hidden');
     return;
@@ -94,12 +93,10 @@ function render() {
   panel.classList.toggle('hidden', !(parallel && active));
   if (!(parallel && active)) return;
 
-  batch = state?.parallelBatch || batch;
-  const number = batch?.number || 0;
-  const count = streamingCount();
-  if (state?.status === 'paused') title.textContent = number ? `Round ${number} · tạm dừng` : 'Song song · tạm dừng';
-  else if (number) title.textContent = `Round ${number}${count ? ` · ${count} AI đang hoạt động` : ''}`;
-  else title.textContent = count ? `${count} AI đang hoạt động` : 'Chuẩn bị round mới';
+  const count = activeWorkCount();
+  if (state?.status === 'paused') title.textContent = 'Song song tự do · tạm dừng';
+  else if (state?.status === 'pausing') title.textContent = count ? `Đang chờ ${count} AI kết thúc` : 'Đang tạm dừng';
+  else title.textContent = count ? `Song song tự do · ${count} AI đang hoạt động` : 'Song song tự do · sẵn sàng';
 
   chips.innerHTML = '';
   for (const id of activeAgentIds()) {
@@ -127,14 +124,8 @@ function decorateMessage(data) {
     const node = document.querySelector(`[data-message-id="${CSS.escape(data.id)}"]`);
     if (!node) return;
     node.classList.add('parallel-stream-message');
-    if (data.batchId) node.dataset.batchId = data.batchId;
     if (data.startSequence) node.dataset.startSequence = String(data.startSequence);
-    const meta = node.querySelector('.message-meta');
-    if (!meta || meta.querySelector('.parallel-round-badge')) return;
-    const badge = document.createElement('span');
-    badge.className = 'parallel-round-badge';
-    badge.textContent = data.batchNumber ? `R${data.batchNumber}` : 'LIVE';
-    meta.append(badge);
+    if (data.startedAt) node.dataset.startedAt = data.startedAt;
   });
 }
 
@@ -146,7 +137,6 @@ async function init() {
       fetch('/api/state', { cache: 'no-store' }).then((res) => res.json()),
     ]);
     agentStates = { ...(state?.agentStates || {}) };
-    batch = state?.parallelBatch || null;
     render();
   } catch {}
 
@@ -156,12 +146,6 @@ async function init() {
     const next = JSON.parse(event.data);
     state = next;
     if (next.agentStates) agentStates = { ...agentStates, ...next.agentStates };
-    batch = next.parallelBatch || null;
-    render();
-  });
-  source.addEventListener('parallel:batch', (event) => {
-    const next = JSON.parse(event.data);
-    batch = next.status === 'completed' ? { ...next, status: 'completed' } : next;
     render();
   });
   source.addEventListener('parallel:agent-status', (event) => {

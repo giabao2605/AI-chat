@@ -40,19 +40,19 @@ function completion(room) {
   });
 }
 
-test('parallel rounds wait at a barrier and persist messages in first-token order', async () => {
+test('free parallel mode starts new replies without waiting for every active agent', async () => {
   const callCount = { a: 0, b: 0, c: 0 };
-  const firstDelay = { a: 20, b: 35, c: 5 };
-  const tailDelay = { a: 30, b: 5, c: 55 };
+  const firstDelay = { a: 10, b: 20, c: 5 };
+  const firstTail = { a: 20, b: 30, c: 300 };
   const providerFactory = (config) => ({
     async streamChat({ onDelta, signal }) {
-      const round = ++callCount[config.id];
-      await wait(firstDelay[config.id], signal);
-      onDelta?.(`${config.id}${round}:`);
-      await wait(tailDelay[config.id], signal);
+      const call = ++callCount[config.id];
+      await wait(call === 1 ? firstDelay[config.id] : 5, signal);
+      onDelta?.(`${config.id}${call}:`);
+      await wait(call === 1 ? firstTail[config.id] : 15, signal);
       onDelta?.('done');
       return {
-        text: `${config.id}${round}:done`,
+        text: `${config.id}${call}:done`,
         usage: { inputTokens: 2, outputTokens: 2, totalTokens: 4, exact: true },
         toolCalls: [],
       };
@@ -66,35 +66,38 @@ test('parallel rounds wait at a barrier and persist messages in first-token orde
     contextConfig: { summarizeAfter: 100 },
   });
   const starts = [];
-  const batches = [];
-  room.on('message:start', (event) => starts.push(event));
-  room.on('parallel:batch', (event) => batches.push(event));
+  const dones = [];
+  room.on('message:start', (event) => starts.push({ ...event, at: Date.now() }));
+  room.on('message:done', (event) => dones.push({ ...event, at: Date.now() }));
   const done = completion(room);
 
   await room.start({
     topicMode: 'manual',
-    topic: 'test parallel barrier',
+    topic: 'test free parallel scheduling',
     conversationMode: 'parallel',
-    maxTurns: 6,
+    maxTurns: 5,
     startSpeaker: 'a',
     sharedPrompt: 'Trò chuyện tự nhiên.',
   });
   const snapshot = await done;
 
-  const batchStarts = batches.filter((event) => event.status === 'started');
-  const batchDone = batches.filter((event) => event.status === 'completed');
-  assert.equal(batchStarts.length, 2);
-  assert.equal(batchDone.length, 2);
-  assert.ok(Date.parse(batchStarts[1].startedAt) >= Date.parse(batchDone[0].finishedAt));
+  const secondAStart = starts.filter((event) => event.speaker === 'a')[1];
+  const firstCDone = dones.find((event) => event.speaker === 'c');
+  assert.ok(secondAStart, 'Agent A should get another turn while Agent C is still working');
+  assert.ok(firstCDone, 'Agent C should eventually finish');
+  assert.ok(secondAStart.at < firstCDone.at, 'A second reply must begin before slow C finishes; no round barrier is allowed');
+
   assert.deepEqual(starts.slice(0, 3).map((event) => event.speaker), ['c', 'a', 'b']);
   assert.deepEqual(snapshot.history.slice(0, 3).map((entry) => entry.speaker), ['c', 'a', 'b']);
   assert.deepEqual(snapshot.history.slice(0, 3).map((entry) => entry.startSequence), [1, 2, 3]);
-  assert.ok(snapshot.history.slice(0, 3).every((entry) => entry.batchNumber === 1));
-  assert.equal(snapshot.turn, 6);
+  assert.ok(snapshot.history.every((entry) => entry.batchNumber == null));
+  assert.equal(snapshot.parallelBatch, null);
+  assert.equal(snapshot.parallelScheduler.mode, 'free');
+  assert.equal(snapshot.turn, 5);
   assert.equal(snapshot.status, 'completed');
 });
 
-test('one failed provider does not abort the other agents or the room', async () => {
+test('one failed provider does not abort the other free-running agents or the room', async () => {
   const providerFactory = (config) => ({
     async streamChat({ onDelta, signal }) {
       if (config.id === 'b') {
@@ -119,9 +122,7 @@ test('one failed provider does not abort the other agents or the room', async ()
     contextConfig: { summarizeAfter: 100 },
   });
   let roomErrors = 0;
-  let completedBatch = null;
   room.on('error', () => { roomErrors += 1; });
-  room.on('parallel:batch', (event) => { if (event.status === 'completed') completedBatch = event; });
   const done = completion(room);
 
   await room.start({
@@ -139,21 +140,23 @@ test('one failed provider does not abort the other agents or the room', async ()
   assert.equal(snapshot.turn, 3);
   assert.equal(snapshot.history.filter((entry) => /^[abc]$/.test(entry.speaker)).length, 2);
   assert.equal(snapshot.agentStates.b.status, 'failed');
-  assert.equal(completedBatch.failures, 1);
-  assert.equal(completedBatch.successes, 2);
 });
 
-test('parallel live UI and SSE events are wired into the app', async () => {
-  const [server, index, ui] = await Promise.all([
+test('parallel UI exposes free-running status without round concepts', async () => {
+  const [server, runtime, index, ui] = await Promise.all([
     readFile(new URL('../src/server.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/parallel-batch-room.js', import.meta.url), 'utf8'),
     readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
     readFile(new URL('../public/parallel-stream-ui.js', import.meta.url), 'utf8'),
   ]);
-  assert.match(server, /ParallelBatchRoom/);
-  assert.match(server, /'parallel:batch'/);
+  assert.match(server, /new ProfiledRoom/);
   assert.match(server, /'parallel:agent-status'/);
+  assert.doesNotMatch(server, /'parallel:batch'/);
+  assert.match(runtime, /mode: 'free'/);
+  assert.doesNotMatch(runtime, /Promise\.all\(/);
+  assert.doesNotMatch(runtime, /finishParallelBatch/);
   assert.match(index, /src="\/parallel-stream-ui\.js"/);
   assert.match(ui, /parallel:agent-status/);
-  assert.match(ui, /parallel:batch/);
-  assert.match(ui, /parallel-round-badge/);
+  assert.match(ui, /Song song tự do/);
+  assert.doesNotMatch(ui, /Round\s|parallel:batch|parallel-round-badge/);
 });

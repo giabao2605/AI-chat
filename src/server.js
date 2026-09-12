@@ -22,7 +22,7 @@ import { RoomManager } from './room-manager.js';
 import { resolveRequestRoomId } from './room-routing.js';
 import { TavilyWebSearch } from './web-search.js';
 
-// ProfiledRoom extends ParallelBatchRoom, preserving the parallel batch/SSE contract while adding per-agent profiles.
+// ProfiledRoom keeps the free-running parallel scheduler while adding per-agent profiles.
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = normalize(join(__dirname, '..', 'public'));
@@ -72,7 +72,7 @@ function sendSse(res, event, payload) {
 
 const eventNames = [
   'state', 'topic', 'meta', 'message:start', 'message:delta', 'message:done', 'message:cancelled', 'message:failed',
-  'stats', 'research:start', 'research:done', 'research:error', 'parallel:batch', 'parallel:agent-status', 'debug', 'room:error',
+  'stats', 'research:start', 'research:done', 'research:error', 'parallel:agent-status', 'debug', 'room:error',
 ];
 
 const manager = new RoomManager({
