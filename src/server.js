@@ -17,7 +17,7 @@ import {
 import { CloudflareImageTool } from './cloudflare-image-tool.js';
 import { createImageContextResolver } from './image-context.js';
 import { OpenAICompatibleImageTool } from './image-tool.js';
-import { ParallelBatchRoom } from './parallel-batch-room.js';
+import { ProfiledRoom } from './profiled-room.js';
 import { RoomManager, normalizeRoomId } from './room-manager.js';
 import { TavilyWebSearch } from './web-search.js';
 
@@ -76,7 +76,7 @@ const manager = new RoomManager({
   maxRooms: serverConfig.maxRooms,
   roomTtlMs: serverConfig.roomTtlMs,
   createRoom(roomId) {
-    const room = new ParallelBatchRoom({
+    const room = new ProfiledRoom({
       agents: configuredAgents,
       hardTurnLimit: serverConfig.hardTurnLimit,
       webSearch,
