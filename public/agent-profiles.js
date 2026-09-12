@@ -242,7 +242,7 @@ async function initAgentProfiles() {
   shell.id = 'agentProfilesShell';
   shell.className = 'agent-profile-shell';
   const heading = document.createElement('div');
-  heading.innerHTML = '<strong>Agent Profiles</strong><div class="footnote">Danh tính bề mặt và thông số sinh câu trả lời riêng cho từng AI. Provider/model vẫn là implementation detail phía server.</div>';
+  heading.innerHTML = '<strong>Agent Profiles</strong>';
   shell.append(heading);
   for (const id of cachedConfig.agentSlots || ['a', 'b', 'c', 'd']) {
     const agent = cachedConfig.agents?.[id];
