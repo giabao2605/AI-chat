@@ -1,4 +1,5 @@
 import { markdownToSafeHtml } from './markdown.js';
+import { typesetMath } from './math-renderer.js';
 
 if (!document.querySelector('link[data-markdown-ui]')) {
   const stylesheet = document.createElement('link');
@@ -9,7 +10,7 @@ if (!document.querySelector('link[data-markdown-ui]')) {
 }
 
 const chat = document.getElementById('chat');
-const AI_BUBBLE_SELECTOR = '.message.a .bubble, .message.b .bubble';
+const AI_BUBBLE_SELECTOR = '.message.a .bubble, .message.b .bubble, .message.c .bubble, .message.d .bubble';
 
 function rawTextSource(bubble) {
   if (!(bubble instanceof HTMLElement)) return null;
@@ -18,25 +19,27 @@ function rawTextSource(bubble) {
   return bubble.firstChild.nodeValue ?? '';
 }
 
-function renderBubble(bubble) {
+async function renderBubble(bubble) {
   if (!(bubble instanceof HTMLElement) || bubble.classList.contains('typing')) return;
   const raw = rawTextSource(bubble);
   if (raw === null) return;
+  bubble.dataset.rawAnswer = raw;
   bubble.classList.add('markdown');
   bubble.innerHTML = markdownToSafeHtml(raw);
+  await typesetMath(bubble);
 }
 
 function scanNode(node) {
   if (node instanceof HTMLElement) {
-    if (node.matches(AI_BUBBLE_SELECTOR)) renderBubble(node);
-    for (const bubble of node.querySelectorAll(AI_BUBBLE_SELECTOR)) renderBubble(bubble);
+    if (node.matches(AI_BUBBLE_SELECTOR)) void renderBubble(node);
+    for (const bubble of node.querySelectorAll(AI_BUBBLE_SELECTOR)) void renderBubble(bubble);
     return;
   }
-  if (node?.nodeType === Node.TEXT_NODE) renderBubble(node.parentElement);
+  if (node?.nodeType === Node.TEXT_NODE) void renderBubble(node.parentElement);
 }
 
 if (chat) {
-  for (const bubble of chat.querySelectorAll(AI_BUBBLE_SELECTOR)) renderBubble(bubble);
+  for (const bubble of chat.querySelectorAll(AI_BUBBLE_SELECTOR)) void renderBubble(bubble);
 
   const observer = new MutationObserver((mutations) => {
     const candidates = new Set();
@@ -64,7 +67,7 @@ if (chat) {
         }
       }
     }
-    for (const bubble of candidates) renderBubble(bubble);
+    for (const bubble of candidates) void renderBubble(bubble);
   });
 
   observer.observe(chat, {
@@ -76,4 +79,4 @@ if (chat) {
   });
 }
 
-export { rawTextSource, renderBubble, scanNode };
+export { AI_BUBBLE_SELECTOR, rawTextSource, renderBubble, scanNode };
