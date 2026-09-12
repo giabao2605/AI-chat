@@ -149,7 +149,7 @@ test('parallel UI exposes free-running status without round concepts', async () 
     readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
     readFile(new URL('../public/parallel-stream-ui.js', import.meta.url), 'utf8'),
   ]);
-  assert.match(server, /ParallelBatchRoom/);
+  assert.match(server, /new ProfiledRoom/);
   assert.match(server, /'parallel:agent-status'/);
   assert.doesNotMatch(server, /'parallel:batch'/);
   assert.match(runtime, /mode: 'free'/);
