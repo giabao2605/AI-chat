@@ -259,17 +259,26 @@
   border-top: 1px solid var(--stroke-soft);
 }
 
-#promptPanel .sidebar-fold-body {
-  padding-top: 12px;
+.prompt-fold > .field {
+  margin-left: 11px;
+  margin-right: 11px;
 }
 
-#promptPanel > summary .prompt-summary-state {
-  color: #708097;
-  font-size: 9px;
+.prompt-fold > summary + .field {
+  margin-top: 11px;
+}
+
+.prompt-fold > .two-cols {
+  margin: 0 11px 9px;
+}
+
+.prompt-fold > .footnote {
+  margin: 0 11px 11px;
+  line-height: 1.45;
 }
 
 #agentProfilesShell {
-  margin-top: 10px;
+  margin: 10px 11px 11px;
 }
 
 #agentProfilesShell > div:first-child {
