@@ -30,6 +30,14 @@ test('desktop workspace fills the viewport without a header row', () => {
   assert.match(layout, /\.chat-panel\s*\{[^}]*height:\s*100%/s);
 });
 
+test('collapsed sidebar reopen control is a compact arrow tab', () => {
+  assert.match(index, /id="expandControlBtn"[\s\S]*<span>›<\/span>/);
+  assert.match(layout, /\.expand-control-button\s*\{[^}]*width:\s*30px;[^}]*height:\s*54px;/s);
+  assert.match(layout, /\.expand-control-button\s*\{[^}]*font-size:\s*0;/s);
+  assert.match(layout, /\.expand-control-button span\s*\{[^}]*font-size:\s*20px;/s);
+  assert.match(layout, /border-left:\s*0;/);
+});
+
 test('sidebar v3 groups dense controls into a compact hierarchy', () => {
   assert.match(index, /href="\/sidebar-v3\.css"/);
   assert.match(index, /class="section-kicker">Thiết lập nhanh</);
