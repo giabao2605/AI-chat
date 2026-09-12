@@ -24,18 +24,28 @@ function renderLink(label, href) {
   return `<a href="${escapeHtml(safe)}" target="_blank" rel="noopener noreferrer">${renderInline(label)}</a>`;
 }
 
+function findUnescaped(text, needle, start) {
+  let index = text.indexOf(needle, start);
+  while (index !== -1) {
+    let slashes = 0;
+    for (let cursor = index - 1; cursor >= 0 && text[cursor] === '\\'; cursor -= 1) slashes += 1;
+    if (slashes % 2 === 0) return index;
+    index = text.indexOf(needle, index + needle.length);
+  }
+  return -1;
+}
+
+function renderMath(delimiter, body, closing = delimiter) {
+  const className = delimiter === '$$' || delimiter === '\\[' ? 'math-display' : 'math-inline';
+  return `<span class="${className}">${escapeHtml(delimiter)}${escapeHtml(body)}${escapeHtml(closing)}</span>`;
+}
+
 function renderInline(value) {
   const text = String(value ?? '');
   let html = '';
   let index = 0;
 
   while (index < text.length) {
-    if (text[index] === '\\' && index + 1 < text.length) {
-      html += escapeHtml(text[index + 1]);
-      index += 2;
-      continue;
-    }
-
     if (text[index] === '`') {
       const end = text.indexOf('`', index + 1);
       if (end > index + 1) {
@@ -45,8 +55,46 @@ function renderInline(value) {
       }
     }
 
-    if (text.startsWith('**', index)) {
-      const end = text.indexOf('**', index + 2);
+    if (text.startsWith('\\(', index)) {
+      const end = findUnescaped(text, '\\)', index + 2);
+      if (end > index + 2) {
+        html += renderMath('\\(', text.slice(index + 2, end), '\\)');
+        index = end + 2;
+        continue;
+      }
+    }
+
+    if (text.startsWith('\\[', index)) {
+      const end = findUnescaped(text, '\\]', index + 2);
+      if (end > index + 2) {
+        html += renderMath('\\[', text.slice(index + 2, end), '\\]');
+        index = end + 2;
+        continue;
+      }
+    }
+
+    if (text.startsWith('$$', index)) {
+      const end = findUnescaped(text, '$$', index + 2);
+      if (end > index + 2) {
+        html += renderMath('$$', text.slice(index + 2, end));
+        index = end + 2;
+        continue;
+      }
+    }
+
+    if (text[index] === '$') {
+      const end = findUnescaped(text, '$', index + 1);
+      const body = end > index + 1 ? text.slice(index + 1, end) : '';
+      if (body && !/^\s|\s$/.test(body)) {
+        html += renderMath('$', body);
+        index = end + 1;
+        continue;
+      }
+    }
+
+    if (text.startsWith('**', index) || text.startsWith('__', index)) {
+      const marker = text.slice(index, index + 2);
+      const end = text.indexOf(marker, index + 2);
       if (end > index + 2) {
         html += `<strong>${renderInline(text.slice(index + 2, end))}</strong>`;
         index = end + 2;
@@ -63,8 +111,9 @@ function renderInline(value) {
       }
     }
 
-    if (text[index] === '*') {
-      const end = text.indexOf('*', index + 1);
+    if (text[index] === '*' || text[index] === '_') {
+      const marker = text[index];
+      const end = text.indexOf(marker, index + 1);
       if (end > index + 1) {
         html += `<em>${renderInline(text.slice(index + 1, end))}</em>`;
         index = end + 1;
@@ -100,6 +149,18 @@ function renderInline(value) {
       }
     }
 
+    if (text[index] === '\\' && index + 1 < text.length) {
+      const next = text[index + 1];
+      if (/^[\\`*_[\]{}()#+\-.!]$/.test(next)) {
+        html += escapeHtml(next);
+        index += 2;
+        continue;
+      }
+      html += '\\';
+      index += 1;
+      continue;
+    }
+
     html += escapeHtml(text[index]);
     index += 1;
   }
@@ -131,6 +192,17 @@ function isRule(line) {
   return /^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line);
 }
 
+function mathBlockDelimiter(line) {
+  const trimmed = String(line || '').trim();
+  if (trimmed.startsWith('$$')) return { open: '$$', close: '$$' };
+  if (trimmed.startsWith('\\[')) return { open: '\\[', close: '\\]' };
+  return null;
+}
+
+function isMathBlockStart(line) {
+  return Boolean(mathBlockDelimiter(line));
+}
+
 function splitTableRow(line) {
   let value = String(line || '').trim();
   if (value.startsWith('|')) value = value.slice(1);
@@ -150,6 +222,7 @@ function isTableStart(lines, index) {
 function isBlockStart(lines, index) {
   const line = lines[index] || '';
   return isFence(line)
+    || isMathBlockStart(line)
     || isHeading(line)
     || isQuote(line)
     || isUnorderedItem(line)
@@ -177,6 +250,43 @@ function renderTable(lines, start) {
   return { html: `<table>${headHtml}${bodyHtml}</table>`, next: index };
 }
 
+function renderMathBlock(lines, start) {
+  const delimiter = mathBlockDelimiter(lines[start]);
+  if (!delimiter) return null;
+  const first = lines[start].trim();
+  const afterOpen = first.slice(delimiter.open.length);
+  const sameLineEnd = afterOpen.lastIndexOf(delimiter.close);
+  if (sameLineEnd >= 0) {
+    const body = afterOpen.slice(0, sameLineEnd);
+    return {
+      html: `<div class="math-display">${escapeHtml(delimiter.open)}${escapeHtml(body)}${escapeHtml(delimiter.close)}</div>`,
+      next: start + 1,
+    };
+  }
+
+  const body = [afterOpen];
+  let index = start + 1;
+  while (index < lines.length) {
+    const line = lines[index];
+    const end = line.indexOf(delimiter.close);
+    if (end >= 0) {
+      body.push(line.slice(0, end));
+      index += 1;
+      return {
+        html: `<div class="math-display">${escapeHtml(delimiter.open)}${escapeHtml(body.join('\n'))}${escapeHtml(delimiter.close)}</div>`,
+        next: index,
+      };
+    }
+    body.push(line);
+    index += 1;
+  }
+
+  return {
+    html: `<pre class="math-unclosed">${escapeHtml(lines.slice(start).join('\n'))}</pre>`,
+    next: lines.length,
+  };
+}
+
 export function markdownToSafeHtml(value) {
   const lines = String(value ?? '').replace(/\r\n?/g, '\n').split('\n');
   const blocks = [];
@@ -201,6 +311,13 @@ export function markdownToSafeHtml(value) {
       if (index < lines.length) index += 1;
       const languageClass = language ? ` class="language-${escapeHtml(language)}"` : '';
       blocks.push(`<pre><code${languageClass}>${escapeHtml(code.join('\n'))}</code></pre>`);
+      continue;
+    }
+
+    if (isMathBlockStart(line)) {
+      const math = renderMathBlock(lines, index);
+      blocks.push(math.html);
+      index = math.next;
       continue;
     }
 
