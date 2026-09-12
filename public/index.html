@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="/chat-v4.css" />
   <link rel="stylesheet" href="/research-status.css" />
   <link rel="stylesheet" href="/lab-v2.css" />
+  <link rel="stylesheet" href="/sidebar-v3.css" />
 </head>
 <body>
   <div class="app-shell">
@@ -38,73 +39,88 @@
 
       <aside id="controlPanel" class="control-panel">
         <div class="panel-title">
-          <div><div class="eyebrow">CONTROL ROOM</div><h2>Thiết lập</h2></div>
+          <div class="panel-heading-copy"><div class="eyebrow">CONTROL ROOM</div><h2>Thiết lập</h2><small>Phiên, điều phối và hành vi AI</small></div>
           <div class="panel-actions">
             <button id="collapseControlBtn" class="icon-button" type="button" title="Thu gọn Control Room" aria-expanded="true" aria-controls="controlPanel">‹</button>
             <button id="resetBtn" class="icon-button" type="button" title="Reset phiên">↻</button>
           </div>
         </div>
 
-        <section class="control-monitor" aria-label="Trạng thái phòng và thống kê token">
-          <div class="status-line control-status-line">
-            <div class="status-wrap"><span id="connectionDot" class="dot offline"></span><span id="connectionText">Đang kết nối</span><span id="roomStatus" class="status-pill">idle</span></div>
-            <button id="historyBtn" class="button ghost compact-button" type="button">Lịch sử <span id="historyCount" class="history-count">0</span></button>
-          </div>
-
-          <div class="compact-stats control-stats" aria-label="Thống kê token">
-            <div class="mini-stat agent-a-mini" title="Token Agent A">
-              <span id="agentAName">Agent A</span>
-              <strong id="agentATotal">0</strong>
-              <small><span id="agentAModel">-</span> · In <b id="agentAInput">0</b> / Out <b id="agentAOutput">0</b></small>
-              <i id="agentAEstimate"></i>
+        <div class="control-scroll">
+          <section class="control-monitor" aria-label="Trạng thái phòng và thống kê token">
+            <div class="status-line control-status-line">
+              <div class="status-wrap"><span id="connectionDot" class="dot offline"></span><span id="connectionText">Đang kết nối</span><span id="roomStatus" class="status-pill">idle</span></div>
+              <button id="historyBtn" class="button ghost compact-button" type="button">Lịch sử <span id="historyCount" class="history-count">0</span></button>
             </div>
-            <div class="mini-stat agent-b-mini" title="Token Agent B">
-              <span id="agentBName">Agent B</span>
-              <strong id="agentBTotal">0</strong>
-              <small><span id="agentBModel">-</span> · In <b id="agentBInput">0</b> / Out <b id="agentBOutput">0</b></small>
-              <i id="agentBEstimate"></i>
-            </div>
-            <div class="mini-stat room-mini" title="Token toàn phòng">
-              <span>Tổng phiên</span>
-              <strong id="combinedTotal">0</strong>
-              <small><span id="turnCounter">0 / 20</span> lượt</small>
-            </div>
-          </div>
-        </section>
 
-        <section class="control-section" aria-labelledby="sessionSectionLabel">
-          <div id="sessionSectionLabel" class="section-kicker">Phiên</div>
-          <label class="field"><span>Kiểu hội thoại</span><select id="conversationMode"><option value="turns">Theo lượt</option><option value="parallel">Tự do / song song</option></select><small>Theo lượt: các AI luân phiên. Song song: nhiều AI có thể trả lời cùng lúc và tự bắt nhịp theo tin mới.</small></label>
-          <label class="field"><span>Chế độ chủ đề</span><select id="topicMode"><option value="manual">Tôi chọn chủ đề</option><option value="auto">AI tự chọn chủ đề</option></select></label>
-          <label id="topicField" class="field"><span>Chủ đề</span><textarea id="topic" rows="3" placeholder="Ví dụ: Nếu bốn AI phải cùng thiết kế một thành phố trên Sao Hỏa..."></textarea></label>
-          <div class="two-cols"><label class="field"><span>Số lượt</span><input id="maxTurns" type="number" min="1" max="200" value="20" /></label><label class="field"><span>AI ưu tiên mở lời</span><select id="startSpeaker"><option value="random">Ngẫu nhiên</option><option value="a">Agent A</option><option value="b">Agent B</option></select></label></div>
-        </section>
+            <details id="tokenPanel" class="sidebar-fold token-fold">
+              <summary><span class="fold-copy"><b>Thống kê phiên</b><small><span id="turnCounter">0 / 20</span> lượt</small></span></summary>
+              <div class="sidebar-fold-body">
+                <div class="compact-stats control-stats" aria-label="Thống kê token">
+                  <div class="mini-stat agent-a-mini" title="Token Agent A">
+                    <span id="agentAName">Agent A</span>
+                    <strong id="agentATotal">0</strong>
+                    <small><span id="agentAModel">-</span> · In <b id="agentAInput">0</b> / Out <b id="agentAOutput">0</b></small>
+                    <i id="agentAEstimate"></i>
+                  </div>
+                  <div class="mini-stat agent-b-mini" title="Token Agent B">
+                    <span id="agentBName">Agent B</span>
+                    <strong id="agentBTotal">0</strong>
+                    <small><span id="agentBModel">-</span> · In <b id="agentBInput">0</b> / Out <b id="agentBOutput">0</b></small>
+                    <i id="agentBEstimate"></i>
+                  </div>
+                  <div class="mini-stat room-mini" title="Token toàn phòng">
+                    <span>Tổng token</span>
+                    <strong id="combinedTotal">0</strong>
+                    <small>toàn phiên</small>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </section>
 
-        <section class="control-section" aria-labelledby="modelSectionLabel">
-          <div id="modelSectionLabel" class="section-kicker">Mô hình</div>
-          <div class="two-cols"><label class="field"><span>Temperature</span><input id="temperature" type="number" min="0" max="2" step="0.1" value="0.8" /></label><label class="field"><span>Max token/lượt</span><input id="maxOutputTokens" type="number" min="64" max="16000" value="1200" /></label></div>
-          <label class="toggle-row"><input id="autoStart" type="checkbox" /><span><b>Tự chạy khi mở trang</b><small>Chỉ hoạt động khi chọn “AI tự chọn chủ đề”.</small></span></label>
-        </section>
+          <section class="control-section sidebar-primary" aria-labelledby="sessionSectionLabel">
+            <div id="sessionSectionLabel" class="section-kicker">Thiết lập nhanh</div>
+            <label class="field"><span>Kiểu hội thoại</span><select id="conversationMode"><option value="turns">Theo lượt</option><option value="parallel">Tự do / song song</option></select></label>
+            <label class="field"><span>Chế độ chủ đề</span><select id="topicMode"><option value="manual">Tôi chọn chủ đề</option><option value="auto">AI tự chọn chủ đề</option></select></label>
+            <label id="topicField" class="field"><span>Chủ đề</span><textarea id="topic" rows="3" placeholder="Ví dụ: Nếu bốn AI phải cùng thiết kế một thành phố trên Sao Hỏa..."></textarea></label>
+          </section>
 
-        <section class="control-section" aria-labelledby="promptSectionLabel">
-          <div id="promptSectionLabel" class="section-kicker">Hành vi</div>
-          <details id="promptPanel" class="advanced">
-            <summary>Prompt & tính cách</summary>
-            <label class="field"><span>Luật chung</span><textarea id="sharedPrompt" rows="9"></textarea></label>
-            <label class="field"><span><i class="agent-dot a"></i> Persona Agent A</span><textarea id="personaA" rows="4" placeholder="Ví dụ: hoài nghi, thích phản biện và yêu cầu bằng chứng."></textarea></label>
-            <label class="field"><span><i class="agent-dot b"></i> Persona Agent B</span><textarea id="personaB" rows="4" placeholder="Ví dụ: thích khám phá giả thuyết và đề xuất hướng mới."></textarea></label>
-            <div class="two-cols">
-              <button id="savePromptBtn" class="button primary" type="button">Lưu prompt</button>
-              <button id="resetPromptBtn" class="button ghost" type="button">Khôi phục mặc định</button>
+          <details id="orchestrationPanel" class="sidebar-fold">
+            <summary><span class="fold-copy"><b>Điều phối</b><small>Lượt, AI mở lời và tự chạy</small></span></summary>
+            <div class="sidebar-fold-body">
+              <div class="sidebar-grid-2">
+                <label class="field"><span>Số lượt</span><input id="maxTurns" type="number" min="1" max="200" value="20" /></label>
+                <label class="field"><span>AI mở lời</span><select id="startSpeaker"><option value="random">Ngẫu nhiên</option><option value="a">Agent A</option><option value="b">Agent B</option></select></label>
+              </div>
+              <label class="toggle-row"><input id="autoStart" type="checkbox" /><span><b>Tự chạy khi mở trang</b><small>Chỉ dùng được khi AI tự chọn chủ đề.</small></span></label>
+              <div class="legacy-generation-settings" aria-hidden="true">
+                <label class="field"><span>Temperature</span><input id="temperature" type="number" min="0" max="2" step="0.1" value="0.8" /></label>
+                <label class="field"><span>Max token/lượt</span><input id="maxOutputTokens" type="number" min="64" max="16000" value="1200" /></label>
+              </div>
             </div>
-            <p id="promptSaveStatus" class="footnote">Prompt đã lưu sẽ được dùng làm system prompt từ phiên tiếp theo.</p>
           </details>
-        </section>
 
-        <div id="configWarning" class="warning hidden"></div>
+          <details id="promptPanel" class="sidebar-fold">
+            <summary><span class="fold-copy"><b>AI & Prompt</b><small>Luật chung, profile và phong cách từng AI</small></span></summary>
+            <div class="sidebar-fold-body">
+              <label class="field"><span>Luật chung</span><textarea id="sharedPrompt" rows="8"></textarea></label>
+              <label class="field"><span><i class="agent-dot a"></i> Persona Agent A</span><textarea id="personaA" rows="4" placeholder="Ví dụ: hoài nghi, thích phản biện và yêu cầu bằng chứng."></textarea></label>
+              <label class="field"><span><i class="agent-dot b"></i> Persona Agent B</span><textarea id="personaB" rows="4" placeholder="Ví dụ: thích khám phá giả thuyết và đề xuất hướng mới."></textarea></label>
+              <div class="two-cols">
+                <button id="savePromptBtn" class="button primary" type="button">Lưu prompt</button>
+                <button id="resetPromptBtn" class="button ghost" type="button">Mặc định</button>
+              </div>
+              <p id="promptSaveStatus" class="footnote">Prompt đã lưu sẽ được dùng làm system prompt từ phiên tiếp theo.</p>
+            </div>
+          </details>
+
+          <div id="configWarning" class="warning hidden config-warning-slot"></div>
+        </div>
+
         <div class="control-footer">
           <button id="startBtn" class="button primary wide">Bắt đầu phiên</button>
-          <p class="footnote">API key chỉ nằm ở server qua <code>.env</code>, không được gửi xuống trình duyệt.</p>
+          <p class="footnote">API key nằm ở server qua <code>.env</code>.</p>
         </div>
       </aside>
     </main>
