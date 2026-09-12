@@ -17,9 +17,11 @@ import {
 import { CloudflareImageTool } from './cloudflare-image-tool.js';
 import { createImageContextResolver } from './image-context.js';
 import { OpenAICompatibleImageTool } from './image-tool.js';
-import { ParallelBatchRoom } from './parallel-batch-room.js';
+import { ProfiledRoom } from './profiled-room.js';
 import { RoomManager, normalizeRoomId } from './room-manager.js';
 import { TavilyWebSearch } from './web-search.js';
+
+// ProfiledRoom extends ParallelBatchRoom, preserving the parallel batch/SSE contract while adding per-agent profiles.
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = normalize(join(__dirname, '..', 'public'));
@@ -76,7 +78,7 @@ const manager = new RoomManager({
   maxRooms: serverConfig.maxRooms,
   roomTtlMs: serverConfig.roomTtlMs,
   createRoom(roomId) {
-    const room = new ParallelBatchRoom({
+    const room = new ProfiledRoom({
       agents: configuredAgents,
       hardTurnLimit: serverConfig.hardTurnLimit,
       webSearch,
