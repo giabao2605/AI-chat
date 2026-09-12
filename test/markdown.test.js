@@ -23,6 +23,29 @@ test('renders headings, tables, code blocks and safe links', () => {
   assert.match(html, /<pre><code class="language-js">const x = &#39;&lt;tag&gt;&#39;;<\/code><\/pre>/);
 });
 
+test('preserves inline TeX delimiters and markdown around math', () => {
+  const html = markdownToSafeHtml('**Dũng hạng 2**: khoảng cách là \\(|2-6|=4\\), nên mệnh đề sai.');
+
+  assert.match(html, /<strong>Dũng hạng 2<\/strong>/);
+  assert.match(html, /<span class="math-inline">\\\(\|2-6\|=4\\\)<\/span>/);
+  assert.doesNotMatch(html, /\\\*\\\*/);
+});
+
+test('preserves dollar and display TeX for MathJax', () => {
+  const html = markdownToSafeHtml(`Công thức inline $x^2 + y^2 = z^2$.\n\n\\[\n\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}\n\\]`);
+
+  assert.match(html, /<span class="math-inline">\$x\^2 \+ y\^2 = z\^2\$<\/span>/);
+  assert.match(html, /<div class="math-display">\\\[/);
+  assert.match(html, /\\sum_\{i=1\}\^\{n\} i = \\frac\{n\(n\+1\)\}\{2\}/);
+  assert.match(html, /\\\]<\/div>/);
+});
+
+test('keeps TeX commands intact instead of swallowing backslashes', () => {
+  const html = markdownToSafeHtml('Giá trị là \\(\\sqrt{2} + \\alpha\\).');
+  assert.match(html, /\\sqrt\{2\}/);
+  assert.match(html, /\\alpha/);
+});
+
 test('escapes raw HTML and never creates javascript links', () => {
   const html = markdownToSafeHtml(`<img src=x onerror="alert(1)">\n\n[click](javascript:alert(1))`);
 

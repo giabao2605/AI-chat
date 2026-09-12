@@ -1,5 +1,7 @@
 .message.a .bubble.markdown,
-.message.b .bubble.markdown {
+.message.b .bubble.markdown,
+.message.c .bubble.markdown,
+.message.d .bubble.markdown {
   white-space: normal;
   line-height: 1.68;
   overflow-wrap: anywhere;
@@ -145,6 +147,35 @@
   font-weight: 700;
 }
 
+.bubble.markdown .math-inline {
+  white-space: nowrap;
+}
+
+.bubble.markdown .math-display {
+  display: block;
+  max-width: 100%;
+  margin: .8em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+}
+
+.bubble.markdown mjx-container {
+  color: #edf1f6;
+}
+
+.bubble.markdown mjx-container[display="true"] {
+  max-width: 100%;
+  margin: .8em 0 !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.bubble.markdown .math-unclosed {
+  color: #d8dee8;
+  white-space: pre-wrap;
+}
+
 .bubble.markdown.typing::after {
   display: inline-block;
   margin-left: 2px;
@@ -152,7 +183,9 @@
 
 @media (max-width: 620px) {
   .message.a .bubble.markdown,
-  .message.b .bubble.markdown {
+  .message.b .bubble.markdown,
+  .message.c .bubble.markdown,
+  .message.d .bubble.markdown {
     line-height: 1.62;
   }
 
