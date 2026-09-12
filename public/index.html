@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="/research-status.css" />
   <link rel="stylesheet" href="/lab-v2.css" />
   <link rel="stylesheet" href="/sidebar-v3.css" />
+  <link rel="stylesheet" href="/empty-state-v2.css" />
 </head>
 <body>
   <div class="app-shell">
@@ -33,7 +34,26 @@
           <button id="returnLiveBtn" class="button ghost" type="button">Quay lại phiên hiện tại</button>
         </div>
 
-        <div id="chat" class="chat" aria-live="polite"><div class="empty-state"><div class="empty-orbit">A ↔ B ↔ C ↔ D</div><h3>Chưa có cuộc trò chuyện.</h3><p>Chọn một chủ đề hoặc để AI tự chọn rồi bắt đầu. Agent C/D sẽ tự tham gia khi đã cấu hình trong .env.</p></div></div>
+        <div id="chat" class="chat" aria-live="polite">
+          <div class="empty-state empty-state-v2" data-empty-v2="1">
+            <div class="empty-state-inner">
+              <div class="empty-kicker">Sẵn sàng</div>
+              <h2>Bắt đầu cuộc trò chuyện</h2>
+              <p class="empty-description">Đặt câu hỏi, trò chuyện, khám phá ý tưởng mới.</p>
+              <div class="empty-actions">
+                <button class="empty-action primary" type="button" data-empty-action="auto-topic" data-default-label="Để AI tự chọn chủ đề">
+                  <span data-empty-label>Để AI tự chọn chủ đề</span><span class="empty-arrow" aria-hidden="true">→</span>
+                </button>
+                <button class="empty-action" type="button" data-empty-action="settings">Mở thiết lập</button>
+              </div>
+              <div class="empty-suggestions" aria-label="Gợi ý bắt đầu">
+                <button class="empty-chip" type="button" data-empty-template="explain">Giải thích</button>
+                <button class="empty-chip" type="button" data-empty-template="ideate">Lên ý tưởng</button>
+                <button class="empty-chip" type="button" data-empty-template="summarize">Tóm tắt</button>
+              </div>
+            </div>
+          </div>
+        </div>
         <form id="userForm" class="composer"><input id="userInput" type="text" maxlength="20000" placeholder="Chen vào cuộc trò chuyện..." autocomplete="off" disabled /><button id="sendBtn" class="button primary" type="submit" disabled>Gửi</button></form>
       </section>
 
@@ -136,6 +156,7 @@
   <script type="module" src="/room-session.js"></script>
   <script type="module" src="/prompt-ui.js"></script>
   <script type="module" src="/app.js"></script>
+  <script type="module" src="/empty-state-ui.js"></script>
   <script type="module" src="/composer-focus.js"></script>
   <script type="module" src="/control-ui.js"></script>
   <script type="module" src="/research-status.js"></script>
