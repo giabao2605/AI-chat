@@ -178,11 +178,20 @@ async function handleApi(req, res, url) {
     });
   }
   if (req.method === 'GET' && pathname === '/api/config') return json(res, 200, getPublicConfig());
-  if (req.method === 'GET' && pathname === '/api/state') {
-    const room = manager.get(roomId).room;
-    return json(res, 200, room.snapshot());
+  if (req.method === 'GET' && pathname === '/api/state') return json(res, 200, manager.get(roomId).room.snapshot());
+  if (req.method === 'POST' && pathname === '/api/rooms') {
+    if (!serverConfig.multiRoomEnabled) {
+      manager.get('default-room');
+      return json(res, 201, { roomId: 'default-room', multiRoom: false });
+    }
+    const body = await readJson(req);
+    const id = resolveRequestRoomId({ multiRoomEnabled: true, queryRoomId: body.roomId || `room_${randomUUID().replace(/-/g, '')}` });
+    manager.get(id);
+    return json(res, 201, { roomId: id, multiRoom: true });
   }
+
   if (req.method === 'GET' && pathname === '/api/events') {
+    const record = manager.get(roomId);
     res.writeHead(200, {
       'content-type': 'text/event-stream; charset=utf-8',
       'cache-control': 'no-cache, no-transform',
@@ -190,98 +199,103 @@ async function handleApi(req, res, url) {
       'x-accel-buffering': 'no',
     });
     res.write(': connected\n\n');
-    manager.addClient(roomId, res);
-    req.on('close', () => manager.removeClient(roomId, res));
+    const detach = manager.attachClient(roomId, res);
+    sendSse(res, 'state', record.room.snapshot());
+    req.on('close', detach);
     return;
   }
 
+  if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed.' });
+  const body = await readJson(req);
   const room = manager.get(roomId).room;
-  if (req.method === 'POST' && pathname === '/api/start') {
-    try { return json(res, 200, await room.start(await readJson(req))); }
-    catch (error) { return json(res, 400, { error: error.message }); }
-  }
-  if (req.method === 'POST' && pathname === '/api/message') {
-    try { return json(res, 200, room.addUserMessage((await readJson(req)).text)); }
-    catch (error) { return json(res, 400, { error: error.message }); }
-  }
-  if (req.method === 'POST' && pathname === '/api/pause') {
-    try { room.pause(); return json(res, 200, room.snapshot()); }
-    catch (error) { return json(res, 400, { error: error.message }); }
-  }
-  if (req.method === 'POST' && pathname === '/api/resume') {
-    try { room.resume(); return json(res, 200, room.snapshot()); }
-    catch (error) { return json(res, 400, { error: error.message }); }
-  }
-  if (req.method === 'POST' && pathname === '/api/stop') {
-    room.stop();
-    return json(res, 200, room.snapshot());
-  }
-  if (req.method === 'POST' && pathname === '/api/reset') {
-    return json(res, 200, room.reset());
-  }
-  if (req.method === 'POST' && pathname === '/api/continue') {
-    try { return json(res, 200, await room.continueFromHistory(await readJson(req))); }
-    catch (error) { return json(res, 400, { error: error.message }); }
-  }
-  if (req.method === 'POST' && pathname === '/api/image') {
-    if (!imageTool) return json(res, 503, { error: 'Image generation chưa được cấu hình.' });
-    try {
-      const body = await readJson(req);
-      const prompt = cleanImagePrompt(body.prompt);
-      if (!prompt) throw new Error('Prompt tạo ảnh trống.');
-      const attachment = await imageTool.generate(prompt);
-      const entry = recordImageMessage(room, prompt, attachment);
-      return json(res, 200, { attachment, entry, state: room.snapshot() });
-    } catch (error) {
-      return json(res, 400, { error: error.message });
-    }
+
+  if (pathname === '/api/start') return json(res, 200, await room.start(body));
+  if (pathname === '/api/continue') return json(res, 200, await room.continueFromHistory(body));
+  if (pathname === '/api/pause') { room.pause(); return json(res, 200, room.snapshot()); }
+  if (pathname === '/api/resume') { room.resume(); return json(res, 200, room.snapshot()); }
+  if (pathname === '/api/stop') { room.stop(); return json(res, 200, room.snapshot()); }
+  if (pathname === '/api/reset') { room.reset(); return json(res, 200, room.snapshot()); }
+  if (pathname === '/api/message') return json(res, 200, room.addUserMessage(body.text));
+  if (pathname === '/api/tools/image') {
+    if (!imageTool) return json(res, 503, { error: 'Tool tạo ảnh chưa được cấu hình hoặc đang bị tắt.' });
+    const prompt = cleanImagePrompt(body.prompt);
+    if (!prompt) return json(res, 400, { error: 'Hãy nhập mô tả ảnh sau /img_gen.' });
+    const attachment = await imageTool.generate(prompt);
+    const entry = recordImageMessage(room, prompt, attachment);
+    return json(res, 200, { ok: true, entry });
   }
 
-  return json(res, 404, { error: 'Không tìm thấy API.' });
+  return json(res, 404, { error: 'API route not found.' });
 }
 
-function mimeType(pathname) {
-  const extension = extname(pathname).toLowerCase();
-  return ({
-    '.html': 'text/html; charset=utf-8',
-    '.js': 'text/javascript; charset=utf-8',
-    '.css': 'text/css; charset=utf-8',
-    '.json': 'application/json; charset=utf-8',
-    '.svg': 'image/svg+xml',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.webp': 'image/webp',
-    '.gif': 'image/gif',
-  })[extension] || 'application/octet-stream';
-}
+const mimeTypes = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+};
 
 async function serveStatic(res, pathname) {
-  const requestedPath = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).replace(/^\/+/, '');
-  const filePath = normalize(join(publicDir, requestedPath));
-  const relativePath = relative(publicDir, filePath);
-  if (relativePath.startsWith('..') || relativePath.includes(`..${sep}`) || relativePath === '..') {
-    return json(res, 403, { error: 'Forbidden' });
-  }
+  const requested = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+  const target = normalize(join(publicDir, requested));
+  const rel = relative(publicDir, target);
+  if (rel.startsWith('..') || rel.includes(`..${sep}`)) return json(res, 403, { error: 'Forbidden.' });
   try {
-    const content = await readFile(filePath);
-    res.writeHead(200, { 'content-type': mimeType(filePath), 'cache-control': 'no-cache' });
-    res.end(content);
+    const data = await readFile(target);
+    res.writeHead(200, {
+      'content-type': mimeTypes[extname(target)] || 'application/octet-stream',
+      'cache-control': pathname.startsWith('/generated/') ? 'public, max-age=31536000, immutable' : 'no-cache',
+    });
+    res.end(data);
   } catch {
-    json(res, 404, { error: 'Not found' });
+    try {
+      const data = await readFile(join(publicDir, 'index.html'));
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
+      res.end(data);
+    } catch {
+      json(res, 404, { error: 'Not found.' });
+    }
   }
 }
 
 const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   try {
-    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-    if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
-    return await serveStatic(res, url.pathname);
+    if (url.pathname.startsWith('/api/')) await handleApi(req, res, url);
+    else await serveStatic(res, url.pathname);
   } catch (error) {
-    return json(res, 500, { error: error?.message || String(error) });
+    const status = error?.code === 'PROVIDER_CIRCUIT_OPEN' ? 503 : 400;
+    json(res, status, { error: error?.message || String(error) });
   }
 });
 
+const heartbeat = setInterval(() => {
+  for (const record of manager.rooms.values()) {
+    for (const client of record.clients) {
+      try { client.write(': ping\n\n'); } catch {}
+    }
+  }
+}, 20_000);
+
+const cleanup = setInterval(() => manager.cleanup(), 10 * 60_000);
+heartbeat.unref?.();
+cleanup.unref?.();
+
+server.on('close', () => {
+  clearInterval(heartbeat);
+  clearInterval(cleanup);
+});
+
 server.listen(serverConfig.port, serverConfig.host, () => {
-  console.log(`AI Conversation Lab running at http://${serverConfig.host}:${serverConfig.port}`);
+  const active = Object.values(configuredAgents).map((agent) => `${agent.id.toUpperCase()}:${agent.name}`).join(', ') || 'none';
+  console.log(`AI Conversation Lab: http://${serverConfig.host}:${serverConfig.port}`);
+  console.log(`Agents: ${active}`);
+  console.log(`Web search: ${webSearch ? 'enabled (tavily)' : 'disabled'}${webSearch && deepResearchConfig.enabled ? ' + deep-read' : ''}`);
+  console.log(`Multi-room: ${serverConfig.multiRoomEnabled ? `enabled (max ${serverConfig.maxRooms})` : 'disabled (default-room only)'}`);
 });
