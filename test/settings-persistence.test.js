@@ -25,3 +25,11 @@ test('prompt editor auto-saves and keeps its saved localStorage value', () => {
   assert.match(promptUi, /window\.addEventListener\('pagehide'/);
   assert.match(promptUi, /Prompt này sẽ được giữ nguyên sau khi reload hoặc cập nhật code/);
 });
+
+test('saved prompt waits for the async main app load with no fixed timeout race', () => {
+  assert.match(promptUi, /function mainAppReady\(\)/);
+  assert.match(promptUi, /new MutationObserver/);
+  assert.match(promptUi, /await waitForMainApp\(\);[\s\S]*parseStoredPromptSettings/);
+  assert.doesNotMatch(promptUi, /for \(let i = 0; i < 100; i \+= 1\)/);
+  assert.doesNotMatch(promptUi, /setTimeout\(resolve, 25\)/);
+});

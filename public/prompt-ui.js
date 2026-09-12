@@ -88,11 +88,24 @@ function restoreDefaults() {
   status.textContent = 'Đã khôi phục và lưu prompt mặc định hiện tại của app.';
 }
 
+function mainAppReady() {
+  const model = $('agentAModel');
+  return Boolean(model?.textContent && model.textContent !== '-');
+}
+
 async function waitForMainApp() {
-  for (let i = 0; i < 100; i += 1) {
-    if ($('agentAModel')?.textContent && $('agentAModel').textContent !== '-') return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
+  if (mainAppReady()) return;
+  const model = $('agentAModel');
+  if (!model || typeof MutationObserver === 'undefined') return;
+
+  await new Promise((resolve) => {
+    const observer = new MutationObserver(() => {
+      if (!mainAppReady()) return;
+      observer.disconnect();
+      resolve();
+    });
+    observer.observe(model, { childList: true, characterData: true, subtree: true });
+  });
 }
 
 async function init() {
@@ -102,6 +115,10 @@ async function init() {
     defaults = createPromptSettings({ sharedPrompt: config?.defaults?.sharedPrompt || '', personaA: '', personaB: '' }, null);
   } catch {}
 
+  // app.js writes the server defaults during its own async load. Always wait until
+  // that load has visibly finished before restoring the browser-owned prompt.
+  // There is intentionally no timeout here: a slow refresh must never let app.js
+  // win the race and overwrite a saved prompt after it has already been restored.
   await waitForMainApp();
   const stored = parseStoredPromptSettings(localStorage.getItem(PROMPT_SETTINGS_STORAGE_KEY));
   saved = stored || createPromptSettings(defaults);
