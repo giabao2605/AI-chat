@@ -15,8 +15,10 @@ const resumeAutoStart = localStorage.getItem(autoStartKey) === '1';
 if (resumeAutoStart) localStorage.setItem(autoStartKey, '0');
 
 let defaults = createPromptSettings({ sharedPrompt: '', personaA: '', personaB: '' }, null);
-let saved = null;
+let saved = parseStoredPromptSettings(localStorage.getItem(PROMPT_SETTINGS_STORAGE_KEY));
 let autoSaveTimer = 0;
+let initialized = false;
+let userEdited = false;
 
 function current(savedAt = new Date().toISOString()) {
   return createPromptSettings({
@@ -46,6 +48,7 @@ function refreshState() {
 }
 
 function apply(settings) {
+  if (!settings) return;
   fields.sharedPrompt.value = settings.sharedPrompt;
   fields.personaA.value = settings.personaA;
   fields.personaB.value = settings.personaB;
@@ -57,6 +60,7 @@ function save({ announce = true } = {}) {
   autoSaveTimer = 0;
   const candidate = current(saved?.savedAt || new Date().toISOString());
   if (saved && promptSettingsEqual(candidate, saved)) {
+    userEdited = false;
     refreshState();
     return saved;
   }
@@ -65,6 +69,7 @@ function save({ announce = true } = {}) {
   try {
     localStorage.setItem(PROMPT_SETTINGS_STORAGE_KEY, JSON.stringify(next));
     saved = next;
+    userEdited = false;
     refreshState();
     if (announce) status.textContent = `Đã lưu lúc ${formatSavedAt(next.savedAt)}. Prompt này sẽ được giữ nguyên sau khi reload hoặc cập nhật code.`;
   } catch {
@@ -74,6 +79,7 @@ function save({ announce = true } = {}) {
 }
 
 function scheduleAutoSave() {
+  userEdited = true;
   refreshState();
   clearTimeout(autoSaveTimer);
   autoSaveTimer = setTimeout(() => save({ announce: false }), 350);
@@ -81,9 +87,11 @@ function scheduleAutoSave() {
 
 function restoreDefaults() {
   clearTimeout(autoSaveTimer);
+  autoSaveTimer = 0;
   const next = createPromptSettings(defaults);
   try { localStorage.setItem(PROMPT_SETTINGS_STORAGE_KEY, JSON.stringify(next)); } catch {}
   saved = next;
+  userEdited = false;
   apply(saved);
   status.textContent = 'Đã khôi phục và lưu prompt mặc định hiện tại của app.';
 }
@@ -108,24 +116,33 @@ async function waitForMainApp() {
   });
 }
 
+function nextPaint() {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
+    else setTimeout(resolve, 0);
+  });
+}
+
 async function init() {
+  // Restore the browser-owned value immediately. app.js may still paint its server
+  // default during startup, so we deliberately restore once more after app init below.
+  if (saved) apply(saved);
+
   try {
     const response = await fetch('/api/config', { cache: 'no-store' });
     const config = await response.json();
     defaults = createPromptSettings({ sharedPrompt: config?.defaults?.sharedPrompt || '', personaA: '', personaB: '' }, null);
   } catch {}
 
-  // app.js writes the server defaults during its own async load. Always wait until
-  // that load has visibly finished before restoring the browser-owned prompt.
-  // There is intentionally no timeout here: a slow refresh must never let app.js
-  // win the race and overwrite a saved prompt after it has already been restored.
   await waitForMainApp();
+  await nextPaint();
+  await nextPaint();
+
+  // Re-read storage in case another same-origin tab saved while this page was loading.
   const stored = parseStoredPromptSettings(localStorage.getItem(PROMPT_SETTINGS_STORAGE_KEY));
-  saved = stored || createPromptSettings(defaults);
+  saved = stored || saved || createPromptSettings(defaults);
   apply(saved);
 
-  // Persist the resolved baseline immediately. Future app versions may ship a new
-  // default prompt, but this browser keeps the current prompt until Reset is used.
   if (!stored) {
     try { localStorage.setItem(PROMPT_SETTINGS_STORAGE_KEY, JSON.stringify(saved)); } catch {}
   }
@@ -134,10 +151,20 @@ async function init() {
   saveBtn.addEventListener('click', () => save());
   resetBtn.addEventListener('click', restoreDefaults);
 
-  // Capture runs before app.js' normal click listener. The exact text visible in the
-  // fields is therefore persisted immediately before app.js builds /api/start payload.
-  startBtn.addEventListener('click', () => save({ announce: false }), true);
-  window.addEventListener('pagehide', () => save({ announce: false }));
+  // Capture the exact visible prompt before starting a session. If startup is still
+  // settling, re-apply the saved value first instead of persisting a server default.
+  startBtn.addEventListener('click', () => {
+    if (!initialized && saved) apply(saved);
+    save({ announce: false });
+  }, true);
+
+  // Only persist on pagehide when the user actually edited a field. Programmatic
+  // writes from app startup must never overwrite the saved browser-owned prompt.
+  window.addEventListener('pagehide', () => {
+    if (userEdited) save({ announce: false });
+  });
+
+  initialized = true;
 
   if (resumeAutoStart) {
     const autoStart = $('autoStart');
