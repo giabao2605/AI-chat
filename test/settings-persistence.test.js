@@ -20,16 +20,24 @@ test('control persistence loads after the main app and restores saved tuning', (
 });
 
 test('prompt editor auto-saves and keeps its saved localStorage value', () => {
+  assert.match(promptUi, /let saved = parseStoredPromptSettings\(localStorage\.getItem\(PROMPT_SETTINGS_STORAGE_KEY\)\)/);
   assert.match(promptUi, /setTimeout\(\(\) => save\(\{ announce: false \}\), 350\)/);
   assert.match(promptUi, /localStorage\.setItem\(PROMPT_SETTINGS_STORAGE_KEY/);
-  assert.match(promptUi, /window\.addEventListener\('pagehide'/);
   assert.match(promptUi, /Prompt này sẽ được giữ nguyên sau khi reload hoặc cập nhật code/);
 });
 
-test('saved prompt waits for the async main app load with no fixed timeout race', () => {
-  assert.match(promptUi, /function mainAppReady\(\)/);
+test('saved prompt wins after async app startup and late default writes', () => {
+  assert.match(promptUi, /if \(saved\) apply\(saved\)/);
+  assert.match(promptUi, /await waitForMainApp\(\);/);
+  assert.match(promptUi, /await nextPaint\(\);\s*await nextPaint\(\);/);
+  assert.match(promptUi, /const stored = parseStoredPromptSettings\(localStorage\.getItem\(PROMPT_SETTINGS_STORAGE_KEY\)\);[\s\S]*apply\(saved\);/);
   assert.match(promptUi, /new MutationObserver/);
-  assert.match(promptUi, /await waitForMainApp\(\);[\s\S]*parseStoredPromptSettings/);
   assert.doesNotMatch(promptUi, /for \(let i = 0; i < 100; i \+= 1\)/);
-  assert.doesNotMatch(promptUi, /setTimeout\(resolve, 25\)/);
+});
+
+test('pagehide never persists a programmatic default over the saved prompt', () => {
+  assert.match(promptUi, /let userEdited = false;/);
+  assert.match(promptUi, /function scheduleAutoSave\(\) \{\s*userEdited = true;/);
+  assert.match(promptUi, /window\.addEventListener\('pagehide',[\s\S]*if \(userEdited\) save\(\{ announce: false \}\);/);
+  assert.doesNotMatch(promptUi, /window\.addEventListener\('pagehide', \(\) => save\(/);
 });
