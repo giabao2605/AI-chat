@@ -17,7 +17,7 @@ import {
 import { CloudflareImageTool } from './cloudflare-image-tool.js';
 import { createImageContextResolver } from './image-context.js';
 import { OpenAICompatibleImageTool } from './image-tool.js';
-import { MultiAgentRoom } from './multi-agent-room.js';
+import { ParallelBatchRoom } from './parallel-batch-room.js';
 import { RoomManager, normalizeRoomId } from './room-manager.js';
 import { TavilyWebSearch } from './web-search.js';
 
@@ -69,14 +69,14 @@ function sendSse(res, event, payload) {
 
 const eventNames = [
   'state', 'topic', 'meta', 'message:start', 'message:delta', 'message:done', 'message:cancelled', 'message:failed',
-  'stats', 'research:start', 'research:done', 'research:error', 'debug', 'room:error',
+  'stats', 'research:start', 'research:done', 'research:error', 'parallel:batch', 'parallel:agent-status', 'debug', 'room:error',
 ];
 
 const manager = new RoomManager({
   maxRooms: serverConfig.maxRooms,
   roomTtlMs: serverConfig.roomTtlMs,
   createRoom(roomId) {
-    const room = new MultiAgentRoom({
+    const room = new ParallelBatchRoom({
       agents: configuredAgents,
       hardTurnLimit: serverConfig.hardTurnLimit,
       webSearch,
