@@ -18,7 +18,8 @@ import { CloudflareImageTool } from './cloudflare-image-tool.js';
 import { createImageContextResolver } from './image-context.js';
 import { OpenAICompatibleImageTool } from './image-tool.js';
 import { ProfiledRoom } from './profiled-room.js';
-import { RoomManager, normalizeRoomId } from './room-manager.js';
+import { RoomManager } from './room-manager.js';
+import { resolveRequestRoomId } from './room-routing.js';
 import { TavilyWebSearch } from './web-search.js';
 
 // ProfiledRoom extends ParallelBatchRoom, preserving the parallel batch/SSE contract while adding per-agent profiles.
@@ -116,7 +117,11 @@ async function readJson(req) {
 }
 
 function requestRoomId(req, url) {
-  return normalizeRoomId(url.searchParams.get('room') || req.headers['x-room-id'] || 'default-room');
+  return resolveRequestRoomId({
+    multiRoomEnabled: serverConfig.multiRoomEnabled,
+    queryRoomId: url.searchParams.get('room'),
+    headerRoomId: req.headers['x-room-id'],
+  });
 }
 
 function cleanImagePrompt(value) {
@@ -161,6 +166,7 @@ async function handleApi(req, res, url) {
       ok: true,
       status: room?.room?.status || 'idle',
       roomId,
+      multiRoom: serverConfig.multiRoomEnabled,
       roomManager: manager.stats(),
       activeAgents: Object.keys(configuredAgents),
       webSearch: Boolean(webSearch),
@@ -174,10 +180,14 @@ async function handleApi(req, res, url) {
   if (req.method === 'GET' && pathname === '/api/config') return json(res, 200, getPublicConfig());
   if (req.method === 'GET' && pathname === '/api/state') return json(res, 200, manager.get(roomId).room.snapshot());
   if (req.method === 'POST' && pathname === '/api/rooms') {
+    if (!serverConfig.multiRoomEnabled) {
+      manager.get('default-room');
+      return json(res, 201, { roomId: 'default-room', multiRoom: false });
+    }
     const body = await readJson(req);
-    const id = normalizeRoomId(body.roomId || `room_${randomUUID().replace(/-/g, '')}`);
+    const id = resolveRequestRoomId({ multiRoomEnabled: true, queryRoomId: body.roomId || `room_${randomUUID().replace(/-/g, '')}` });
     manager.get(id);
-    return json(res, 201, { roomId: id });
+    return json(res, 201, { roomId: id, multiRoom: true });
   }
 
   if (req.method === 'GET' && pathname === '/api/events') {
@@ -287,5 +297,5 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   console.log(`AI Conversation Lab: http://${serverConfig.host}:${serverConfig.port}`);
   console.log(`Agents: ${active}`);
   console.log(`Web search: ${webSearch ? 'enabled (tavily)' : 'disabled'}${webSearch && deepResearchConfig.enabled ? ' + deep-read' : ''}`);
-  console.log(`Multi-room: enabled (max ${serverConfig.maxRooms})`);
+  console.log(`Multi-room: ${serverConfig.multiRoomEnabled ? `enabled (max ${serverConfig.maxRooms})` : 'disabled (default-room only)'}`);
 });
