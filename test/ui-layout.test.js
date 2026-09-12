@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 const index = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
 const layout = await readFile(new URL('../public/layout-v2.css', import.meta.url), 'utf8');
 const visual = await readFile(new URL('../public/ui-v3.css', import.meta.url), 'utf8');
+const sidebar = await readFile(new URL('../public/sidebar-v3.css', import.meta.url), 'utf8');
 const chatV4 = await readFile(new URL('../public/chat-v4.css', import.meta.url), 'utf8');
 
 test('header branding is removed and status/history live inside Control Room', () => {
@@ -29,17 +30,25 @@ test('desktop workspace fills the viewport without a header row', () => {
   assert.match(layout, /\.chat-panel\s*\{[^}]*height:\s*100%/s);
 });
 
-test('visual polish stylesheet and control hierarchy are present', () => {
-  assert.match(index, /href="\/ui-v3\.css"/);
-  assert.match(index, /class="section-kicker">Phiên</);
-  assert.match(index, /class="section-kicker">Mô hình</);
-  assert.match(index, /class="section-kicker">Hành vi</);
+test('sidebar v3 groups dense controls into a compact hierarchy', () => {
+  assert.match(index, /href="\/sidebar-v3\.css"/);
+  assert.match(index, /class="section-kicker">Thiết lập nhanh</);
+  assert.match(index, /id="tokenPanel" class="sidebar-fold token-fold"/);
+  assert.match(index, /id="orchestrationPanel" class="sidebar-fold"/);
+  assert.match(index, /id="promptPanel" class="sidebar-fold prompt-fold"/);
+  assert.match(index, /class="control-scroll"/);
   assert.match(index, /class="control-footer"/);
+  assert.match(sidebar, /\.control-panel\s*\{[^}]*display:\s*flex/s);
+  assert.match(sidebar, /\.control-scroll\s*\{[^}]*overflow-y:\s*auto/s);
+  assert.match(sidebar, /\.sidebar-fold\s*>\s*summary/);
+  assert.match(sidebar, /\.control-footer\s*\{[^}]*flex:\s*0 0 auto/s);
+});
 
+test('visual polish stylesheet is still present', () => {
+  assert.match(index, /href="\/ui-v3\.css"/);
   assert.match(visual, /\.message\.a \.bubble,[\s\S]*\.message\.b \.bubble[\s\S]*background:\s*transparent/);
   assert.match(visual, /\.message\.user \.bubble[\s\S]*background:/);
   assert.match(visual, /\.control-monitor[\s\S]*border:\s*0/);
-  assert.match(visual, /\.control-footer[\s\S]*position:\s*sticky/);
 });
 
 test('chat v4 uses Apple system typography and keeps both AI lanes on the left', () => {
