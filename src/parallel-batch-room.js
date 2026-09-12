@@ -154,6 +154,19 @@ export class ParallelBatchRoom extends MultiAgentRoom {
       .map(({ item }) => item);
   }
 
+  async executeAgentTurn(agentId, activeRunId = this.runId) {
+    const runtime = this.agentRuntime?.[agentId];
+    if (runtime) runtime.parallelSeenIds = new Set(this.history.map((item) => item?.id).filter(Boolean));
+    return super.executeAgentTurn(agentId, activeRunId);
+  }
+
+  hasUnseenParallelTrigger(agentId) {
+    const runtime = this.agentRuntime?.[agentId];
+    const seen = runtime?.parallelSeenIds;
+    if (!(seen instanceof Set)) return super.hasUnseenParallelTrigger(agentId);
+    return this.history.some((item) => item?.id && !seen.has(item.id) && this.parallelRelevantMessage(item, agentId));
+  }
+
   baseParallelOrder() {
     if (this.parallelBaseOrder.length) return this.parallelBaseOrder;
     const first = this.firstSpeaker();
@@ -234,9 +247,7 @@ export class ParallelBatchRoom extends MultiAgentRoom {
       } else {
         attempted = true;
         success = Boolean(outcome?.entry);
-        if (success) {
-          this.setParallelAgentState(agentId, 'done', { messageId: outcome.entry.id, error: '' });
-        }
+        if (success) this.setParallelAgentState(agentId, 'done', { messageId: outcome.entry.id, error: '' });
       }
     } catch (error) {
       cancelled = error?.name === 'AbortError'
