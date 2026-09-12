@@ -72,7 +72,6 @@
                   <div class="mini-stat room-mini" title="Token toàn phòng">
                     <span>Tổng token</span>
                     <strong id="combinedTotal">0</strong>
-                    <small>toàn phiên</small>
                   </div>
                 </div>
               </div>
@@ -87,7 +86,7 @@
           </section>
 
           <details id="orchestrationPanel" class="sidebar-fold">
-            <summary><span class="fold-copy"><b>Điều phối</b><small>Lượt, AI mở lời và tự chạy</small></span></summary>
+            <summary><span class="fold-copy"><b>Điều phối</b></span></summary>
             <div class="sidebar-fold-body">
               <div class="sidebar-grid-2">
                 <label class="field"><span>Số lượt</span><input id="maxTurns" type="number" min="1" max="200" value="20" /></label>
@@ -102,7 +101,7 @@
           </details>
 
           <details id="promptPanel" class="sidebar-fold prompt-fold">
-            <summary><span class="fold-copy"><b>AI & Prompt</b><small>Luật chung, profile và phong cách từng AI</small></span></summary>
+            <summary><span class="fold-copy"><b>AI & Prompt</b></span></summary>
             <label class="field"><span>Luật chung</span><textarea id="sharedPrompt" rows="8"></textarea></label>
             <label class="field"><span><i class="agent-dot a"></i> Persona Agent A</span><textarea id="personaA" rows="4" placeholder="Ví dụ: hoài nghi, thích phản biện và yêu cầu bằng chứng."></textarea></label>
             <label class="field"><span><i class="agent-dot b"></i> Persona Agent B</span><textarea id="personaB" rows="4" placeholder="Ví dụ: thích khám phá giả thuyết và đề xuất hướng mới."></textarea></label>
@@ -118,7 +117,6 @@
 
         <div class="control-footer">
           <button id="startBtn" class="button primary wide">Bắt đầu phiên</button>
-          <p class="footnote">API key nằm ở server qua <code>.env</code>.</p>
         </div>
       </aside>
     </main>
