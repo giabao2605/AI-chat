@@ -101,18 +101,16 @@
             </div>
           </details>
 
-          <details id="promptPanel" class="sidebar-fold">
+          <details id="promptPanel" class="sidebar-fold prompt-fold">
             <summary><span class="fold-copy"><b>AI & Prompt</b><small>Luật chung, profile và phong cách từng AI</small></span></summary>
-            <div class="sidebar-fold-body">
-              <label class="field"><span>Luật chung</span><textarea id="sharedPrompt" rows="8"></textarea></label>
-              <label class="field"><span><i class="agent-dot a"></i> Persona Agent A</span><textarea id="personaA" rows="4" placeholder="Ví dụ: hoài nghi, thích phản biện và yêu cầu bằng chứng."></textarea></label>
-              <label class="field"><span><i class="agent-dot b"></i> Persona Agent B</span><textarea id="personaB" rows="4" placeholder="Ví dụ: thích khám phá giả thuyết và đề xuất hướng mới."></textarea></label>
-              <div class="two-cols">
-                <button id="savePromptBtn" class="button primary" type="button">Lưu prompt</button>
-                <button id="resetPromptBtn" class="button ghost" type="button">Mặc định</button>
-              </div>
-              <p id="promptSaveStatus" class="footnote">Prompt đã lưu sẽ được dùng làm system prompt từ phiên tiếp theo.</p>
+            <label class="field"><span>Luật chung</span><textarea id="sharedPrompt" rows="8"></textarea></label>
+            <label class="field"><span><i class="agent-dot a"></i> Persona Agent A</span><textarea id="personaA" rows="4" placeholder="Ví dụ: hoài nghi, thích phản biện và yêu cầu bằng chứng."></textarea></label>
+            <label class="field"><span><i class="agent-dot b"></i> Persona Agent B</span><textarea id="personaB" rows="4" placeholder="Ví dụ: thích khám phá giả thuyết và đề xuất hướng mới."></textarea></label>
+            <div class="two-cols">
+              <button id="savePromptBtn" class="button primary" type="button">Lưu prompt</button>
+              <button id="resetPromptBtn" class="button ghost" type="button">Mặc định</button>
             </div>
+            <p id="promptSaveStatus" class="footnote">Prompt đã lưu sẽ được dùng làm system prompt từ phiên tiếp theo.</p>
           </details>
 
           <div id="configWarning" class="warning hidden config-warning-slot"></div>
