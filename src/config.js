@@ -151,6 +151,7 @@ export function getServerConfig() {
   return {
     host: process.env.HOST || '127.0.0.1',
     port: intFromEnv('PORT', 3000),
+    multiRoomEnabled: boolFromEnv('MULTI_ROOM_ENABLED', true),
     hardTurnLimit: Math.max(0, intFromEnv('HARD_TURN_LIMIT', 200)),
     roomTtlMs: Math.max(60_000, intFromEnv('ROOM_TTL_MS', 12 * 60 * 60 * 1000)),
     maxRooms: Math.max(1, Math.min(200, intFromEnv('MAX_ROOMS', 30))),
