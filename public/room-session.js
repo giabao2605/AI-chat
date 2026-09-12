@@ -1,3 +1,5 @@
+import { readAgentProfiles } from './agent-profiles.js';
+
 const ROOM_KEY = 'ai-chat-room-id-v2';
 const EXTRA_PERSONAS_KEY = 'ai-chat-extra-personas-v1';
 const HISTORY_KEY = 'ai-chat-history-v1';
@@ -76,6 +78,7 @@ function augmentBody(input, init = {}) {
     const extra = readExtraPersonas();
     body.personaC = document.getElementById('personaC')?.value ?? extra.c ?? '';
     body.personaD = document.getElementById('personaD')?.value ?? extra.d ?? '';
+    body.agentProfiles = readAgentProfiles();
     return { ...init, body: JSON.stringify(body) };
   } catch {
     return init;
