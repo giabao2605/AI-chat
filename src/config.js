@@ -47,11 +47,12 @@ export function getAgentConfig(id) {
   const normalized = String(id || '').trim().toLowerCase();
   const prefix = agentPrefix(normalized);
   const fallbackName = `Agent ${normalized.toUpperCase()}`;
+  const model = String(process.env[`${prefix}_MODEL`] || '').trim();
   return {
     id: normalized,
-    name: process.env[`${prefix}_NAME`] || fallbackName,
+    name: String(process.env[`${prefix}_NAME`] || '').trim() || model || fallbackName,
     apiKey: process.env[`${prefix}_API_KEY`] || '',
-    model: process.env[`${prefix}_MODEL`] || '',
+    model,
     baseUrl: cleanBaseUrl(process.env[`${prefix}_BASE_URL`] || process.env.PROVIDER_BASE_URL),
     timeoutMs: Math.max(5_000, intFromEnv(`${prefix}_TIMEOUT_MS`, intFromEnv('PROVIDER_TIMEOUT_MS', 120_000))),
   };
