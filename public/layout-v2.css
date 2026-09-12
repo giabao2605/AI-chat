@@ -101,7 +101,7 @@
 
   .expand-control-button {
     position: fixed;
-    left: var(--app-gutter);
+    left: 0;
     top: 50%;
     z-index: 12;
     transform: translateY(-50%);
@@ -168,30 +168,41 @@
 }
 
 .expand-control-button {
+  width: 30px;
+  height: 54px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid #344056;
+  border-left: 0;
   border-radius: 0 11px 11px 0;
-  padding: 10px 10px 10px 8px;
+  padding: 0;
   background: rgba(18, 23, 32, .96);
   color: #c9d4e6;
-  box-shadow: 12px 0 30px rgba(0, 0, 0, .24);
+  box-shadow: 10px 0 24px rgba(0, 0, 0, .22);
   font: inherit;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: .02em;
+  font-size: 0;
   cursor: pointer;
+  transition: width .14s ease, border-color .14s ease, background .14s ease;
 }
 
 .expand-control-button span {
-  margin-left: 5px;
+  margin: 0;
   color: #7ea7ef;
-  font-size: 17px;
-  line-height: 0;
-  vertical-align: -1px;
+  font-size: 20px;
+  line-height: 1;
+  transform: translateX(1px);
 }
 
 .expand-control-button:hover {
+  width: 34px;
   border-color: #53698d;
   background: #171e2a;
+}
+
+.expand-control-button:focus-visible {
+  outline: 2px solid #7ea7ef;
+  outline-offset: 2px;
 }
 
 @media (max-width: 900px) {
@@ -250,5 +261,6 @@
     left: 0;
     top: 72px;
     z-index: 12;
+    transform: none;
   }
 }
