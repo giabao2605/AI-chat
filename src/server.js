@@ -21,6 +21,8 @@ import { ProfiledRoom } from './profiled-room.js';
 import { RoomManager, normalizeRoomId } from './room-manager.js';
 import { TavilyWebSearch } from './web-search.js';
 
+// ProfiledRoom extends ParallelBatchRoom, preserving the parallel batch/SSE contract while adding per-agent profiles.
+
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = normalize(join(__dirname, '..', 'public'));
 const serverConfig = getServerConfig();
