@@ -1,3 +1,5 @@
+import { resolveAgentDisplayName } from './model-name-utils.js';
+
 export const AGENT_PROFILE_STORAGE_KEY = 'ai-chat-agent-profiles-v1';
 
 const $ = (id) => document.getElementById(id);
@@ -39,6 +41,8 @@ export function readAgentProfiles() {
 
   for (const id of ids) {
     const saved = stored[id] || {};
+    const agent = cachedConfig?.agents?.[id] || {};
+    const resolvedSavedName = resolveAgentDisplayName(agent, saved.name);
     const name = fieldValue(`profile-${id}-name`);
     const role = fieldValue(`profile-${id}-role`);
     const persona = fieldValue(`profile-${id}-persona`);
@@ -48,7 +52,7 @@ export function readAgentProfiles() {
     if (!cachedConfig?.agents?.[id] && !saved.name && name === undefined) continue;
 
     result[id] = {
-      name: clean(name ?? saved.name ?? cachedConfig?.agents?.[id]?.name ?? `Agent ${id.toUpperCase()}`, 80),
+      name: clean(name ?? resolvedSavedName ?? agent.name ?? `Agent ${id.toUpperCase()}`, 80),
       role: clean(role ?? saved.role ?? '', 1200),
       persona: clean(persona ?? saved.persona ?? '', 6000),
       speakingStyle: clean(speakingStyle ?? saved.speakingStyle ?? '', 3000),
@@ -76,8 +80,9 @@ function createStyles() {
 
 function profileDefaults(id, config, saved) {
   const legacyPersona = $(`persona${id.toUpperCase()}`)?.value || '';
+  const resolvedName = resolveAgentDisplayName(config.agents[id], saved.name);
   return {
-    name: saved.name || config.agents[id]?.name || `Agent ${id.toUpperCase()}`,
+    name: resolvedName || config.agents[id]?.name || `Agent ${id.toUpperCase()}`,
     role: saved.role || '',
     persona: saved.persona ?? legacyPersona,
     speakingStyle: saved.speakingStyle || '',
@@ -157,7 +162,7 @@ function profileCard(id, config, saved) {
   reset.textContent = 'Reset profile';
   reset.addEventListener('click', () => {
     const base = profileDefaults(id, config, {});
-    $(`profile-${id}-name`).value = config.agents[id]?.name || base.name;
+    $(`profile-${id}-name`).value = base.name;
     $(`profile-${id}-role`).value = '';
     $(`profile-${id}-persona`).value = '';
     $(`profile-${id}-style`).value = '';
