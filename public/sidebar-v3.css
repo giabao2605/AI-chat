@@ -12,7 +12,7 @@
 .panel-title {
   flex: 0 0 auto;
   margin: 0;
-  padding: 14px 14px 12px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--stroke-soft);
 }
 
@@ -21,19 +21,7 @@
 }
 
 .panel-heading-copy .eyebrow {
-  margin-bottom: 2px;
-}
-
-.panel-heading-copy h2 {
   margin: 0;
-  font-size: 17px;
-}
-
-.panel-heading-copy small {
-  display: block;
-  margin-top: 3px;
-  color: var(--text-dim);
-  font-size: 9px;
 }
 
 .control-scroll {
