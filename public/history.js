@@ -1,8 +1,24 @@
 export const HISTORY_STORAGE_KEY = 'ai-chat-history-v1';
+export const HISTORY_DELETED_STORAGE_KEY = 'ai-chat-history-deleted-v1';
 export const HISTORY_LIMIT = 50;
+export const HISTORY_DELETED_LIMIT = 200;
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function normalizedRunIds(values, limit = HISTORY_DELETED_LIMIT) {
+  const source = Array.isArray(values) ? values : [];
+  const unique = [];
+  const seen = new Set();
+  for (const value of source) {
+    const runId = String(value || '').trim();
+    if (!runId || seen.has(runId)) continue;
+    seen.add(runId);
+    unique.push(runId);
+    if (unique.length >= Math.max(1, limit)) break;
+  }
+  return unique;
 }
 
 export function createHistoryRecord(snapshot, savedAt = new Date().toISOString()) {
@@ -20,11 +36,13 @@ export function createHistoryRecord(snapshot, savedAt = new Date().toISOString()
   };
 }
 
-export function upsertHistory(records, snapshot, savedAt = new Date().toISOString(), limit = HISTORY_LIMIT) {
+export function upsertHistory(records, snapshot, savedAt = new Date().toISOString(), limit = HISTORY_LIMIT, deletedRunIds = []) {
   const record = createHistoryRecord(snapshot, savedAt);
   if (!record) return Array.isArray(records) ? records : [];
   const source = Array.isArray(records) ? records : [];
-  return [record, ...source.filter((item) => item?.runId !== record.runId)]
+  const deleted = new Set(normalizedRunIds(deletedRunIds));
+  if (deleted.has(record.runId)) return source;
+  return [record, ...source.filter((item) => item?.runId !== record.runId && !deleted.has(item?.runId))]
     .sort((a, b) => String(b.savedAt).localeCompare(String(a.savedAt)))
     .slice(0, Math.max(1, limit));
 }
@@ -41,4 +59,23 @@ export function parseStoredHistory(raw) {
   } catch {
     return [];
   }
+}
+
+export function parseDeletedHistory(raw, limit = HISTORY_DELETED_LIMIT) {
+  if (!raw) return [];
+  try {
+    return normalizedRunIds(JSON.parse(raw), limit);
+  } catch {
+    return [];
+  }
+}
+
+export function addDeletedHistoryRunIds(existing, runIds, limit = HISTORY_DELETED_LIMIT) {
+  const next = Array.isArray(runIds) ? runIds : [runIds];
+  return normalizedRunIds([...next, ...(Array.isArray(existing) ? existing : [])], limit);
+}
+
+export function filterDeletedHistory(records, deletedRunIds = []) {
+  const deleted = new Set(normalizedRunIds(deletedRunIds));
+  return (Array.isArray(records) ? records : []).filter((item) => item?.runId && !deleted.has(item.runId));
 }
