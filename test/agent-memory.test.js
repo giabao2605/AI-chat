@@ -65,7 +65,7 @@ test('memory store isolates agents, retrieves relevant entries and supersedes ke
   }
 });
 
-test('memory manager keeps private context agent-scoped and consolidates typed memories', async () => {
+test('memory manager keeps private context agent-scoped and consolidates only provenance-backed memories', async () => {
   const store = new SqliteMemoryStore({ path: ':memory:' });
   const memory = new AgentMemoryManager({
     store,
@@ -94,18 +94,43 @@ test('memory manager keeps private context agent-scoped and consolidates typed m
               content: 'Người quan sát thích các agent có quyết định độc lập.',
               importance: 0.9,
               confidence: 0.95,
+              sourceEventIds: ['m1'],
             },
             {
               type: 'belief',
               content: 'Tôi nghi Luna 3 đang che giấu một chi tiết.',
               importance: 0.7,
               confidence: 0.55,
+              sourceEventIds: ['m3'],
+            },
+            {
+              type: 'semantic',
+              key: 'unverified.agent.claim',
+              content: 'Kho bí mật nằm dưới tầng hầm.',
+              importance: 1,
+              confidence: 1,
+              sourceEventIds: ['m2'],
+            },
+            {
+              type: 'belief',
+              content: 'Tôi tin kho bí mật nằm dưới tầng hầm.',
+              importance: 0.8,
+              confidence: 0.7,
+              sourceEventIds: ['m2'],
             },
             {
               type: 'private',
               content: 'Memory consolidator không được phép tạo loại này.',
               importance: 1,
               confidence: 1,
+              sourceEventIds: ['m1'],
+            },
+            {
+              type: 'episodic',
+              content: 'Ký ức không có provenance hợp lệ phải bị loại.',
+              importance: 0.9,
+              confidence: 0.9,
+              sourceEventIds: ['does-not-exist'],
             },
           ] }),
           usage: usage(),
@@ -121,14 +146,21 @@ test('memory manager keeps private context agent-scoped and consolidates typed m
       runId: 'run-1',
       events: [
         { id: 'm1', speaker: 'user', name: 'Bạn', text: 'Tôi muốn các agent tự quyết định.' },
-        { id: 'm2', speaker: 'c', name: 'Luna 3', text: 'Tôi sẽ giữ lại một phần thông tin.' },
+        { id: 'm2', speaker: 'c', name: 'Luna 3', text: 'Kho bí mật nằm dưới tầng hầm.' },
+        { id: 'm3', speaker: 'a', name: 'Luna 1', text: 'Tôi nghi Luna 3 đang che giấu một chi tiết.' },
       ],
     });
 
     assert.equal(result.stored.length, 2);
     const memories = memory.list('a');
-    assert.equal(memories.some((item) => item.type === 'semantic' && /quyết định độc lập/i.test(item.content)), true);
-    assert.equal(memories.some((item) => item.type === 'belief' && /Luna 3/i.test(item.content)), true);
+    const semantic = memories.find((item) => item.type === 'semantic' && /quyết định độc lập/i.test(item.content));
+    const belief = memories.find((item) => item.type === 'belief' && /Luna 3/i.test(item.content));
+    assert.ok(semantic);
+    assert.ok(belief);
+    assert.deepEqual(semantic.metadata.sourceEventIds, ['m1']);
+    assert.deepEqual(belief.metadata.sourceEventIds, ['m3']);
+    assert.equal(memories.some((item) => /Kho bí mật nằm dưới tầng hầm/i.test(item.content)), false);
+    assert.equal(memories.some((item) => /provenance hợp lệ/i.test(item.content)), false);
   } finally {
     store.close();
   }
