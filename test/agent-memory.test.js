@@ -34,13 +34,19 @@ test('memory store isolates agents, retrieves relevant entries and supersedes ke
     });
     store.upsert({
       agentId: 'b', namespace: 'agent', type: 'semantic',
-      content: 'Mật mã kho hàng là BLUE-428.', importance: 0.95, confidence: 1,
+      content: 'Mật mã kho hàng là BLUE-428.', importance: 1, confidence: 1,
     });
 
     const aSearch = store.retrieve('a', { namespaces: ['agent'], query: 'game suy luận agent', limit: 5 });
     assert.equal(aSearch.length, 1);
     assert.match(aSearch[0].content, /game suy luận/i);
-    assert.equal(store.retrieve('b', { namespaces: ['agent'], query: 'game suy luận', limit: 5 }).some((item) => /game suy luận/i.test(item.content)), false);
+
+    const unrelatedBSearch = store.retrieve('b', { namespaces: ['agent'], query: 'game suy luận agent', limit: 5 });
+    assert.equal(unrelatedBSearch.length, 0, 'high-importance but unrelated memory must not pollute context');
+
+    const relevantBSearch = store.retrieve('b', { namespaces: ['agent'], query: 'mật mã kho hàng BLUE', limit: 5 });
+    assert.equal(relevantBSearch.length, 1);
+    assert.match(relevantBSearch[0].content, /BLUE-428/);
 
     const old = store.list('a', { namespaces: ['agent'], includeInactive: true })[0];
     store.upsert({
@@ -75,6 +81,8 @@ test('memory manager keeps private context agent-scoped and consolidates typed m
     assert.match(JSON.stringify(memory.list('a')), /RED-731/);
     assert.match(JSON.stringify(memory.list('b')), /RED-731/);
     assert.doesNotMatch(JSON.stringify(memory.list('c')), /RED-731/);
+    assert.equal(memory.retrieve('b', { query: 'RED-731', runId: 'run-1' }).length, 0, 'current-run private context is already injected by the live private-context layer');
+    assert.match(JSON.stringify(memory.retrieve('b', { query: 'RED-731', runId: 'run-2' })), /RED-731/);
 
     const provider = {
       async streamChat() {
