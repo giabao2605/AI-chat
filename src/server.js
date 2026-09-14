@@ -162,11 +162,6 @@ function recordImageMessage(room, prompt, attachment) {
   return entry;
 }
 
-function validAgentId(value) {
-  const id = String(value || '').trim().toLowerCase();
-  return Object.prototype.hasOwnProperty.call(configuredAgents, id) ? id : '';
-}
-
 async function handleApi(req, res, url) {
   const pathname = url.pathname;
   const roomId = requestRoomId(req, url);
@@ -192,20 +187,6 @@ async function handleApi(req, res, url) {
   }
   if (req.method === 'GET' && pathname === '/api/config') return json(res, 200, getPublicConfig());
   if (req.method === 'GET' && pathname === '/api/state') return json(res, 200, manager.get(roomId).room.snapshot());
-  if (req.method === 'GET' && pathname === '/api/memory') {
-    if (!memoryManager) return json(res, 503, { error: 'Agent memory đang bị tắt.' });
-    const agentId = validAgentId(url.searchParams.get('agent'));
-    if (!agentId) return json(res, 400, { error: 'Agent memory cần agent id hợp lệ (a/b/c/d đã cấu hình).' });
-    const limit = Math.max(1, Math.min(500, Number.parseInt(url.searchParams.get('limit') || '100', 10) || 100));
-    const includeInactive = url.searchParams.get('inactive') === '1';
-    const type = String(url.searchParams.get('type') || '').trim();
-    return json(res, 200, {
-      agentId,
-      scope: memoryManager.scope,
-      stats: memoryManager.stats(agentId, { roomId }),
-      memories: memoryManager.list(agentId, { roomId, limit, includeInactive, type }),
-    });
-  }
   if (req.method === 'POST' && pathname === '/api/rooms') {
     if (!serverConfig.multiRoomEnabled) {
       manager.get('default-room');
@@ -243,14 +224,6 @@ async function handleApi(req, res, url) {
   if (pathname === '/api/stop') { room.stop(); return json(res, 200, room.snapshot()); }
   if (pathname === '/api/reset') { room.reset(); return json(res, 200, room.snapshot()); }
   if (pathname === '/api/message') return json(res, 200, room.addUserMessage(body.text));
-  if (pathname === '/api/memory/clear') {
-    if (!memoryManager) return json(res, 503, { error: 'Agent memory đang bị tắt.' });
-    const agentId = validAgentId(body.agentId);
-    if (!agentId) return json(res, 400, { error: 'agentId không hợp lệ.' });
-    const removed = memoryManager.clear(agentId, { roomId, type: body.type || '' });
-    room.refreshMemoryStats?.(agentId);
-    return json(res, 200, { ok: true, agentId, removed });
-  }
   if (pathname === '/api/tools/image') {
     if (!imageTool) return json(res, 503, { error: 'Tool tạo ảnh chưa được cấu hình hoặc đang bị tắt.' });
     const prompt = cleanImagePrompt(body.prompt);
