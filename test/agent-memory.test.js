@@ -173,7 +173,7 @@ test('room injects only each agent own long-term memory into model context', asy
   try {
     const completed = waitForCompleted(room);
     await room.start({
-      topic: `Hãy thảo luận về mật mã ${secret}`,
+      topic: 'Hãy thảo luận về mật mã thử nghiệm và cách quản lý thông tin.',
       maxTurns: 3,
       startSpeaker: 'a',
       sharedPrompt: 'Talk normally.',
@@ -188,4 +188,49 @@ test('room injects only each agent own long-term memory into model context', asy
   } finally {
     store.close();
   }
+});
+
+test('background consolidation keeps an immutable old-session batch across reset', async () => {
+  let captured = null;
+  let release;
+  const blocker = new Promise((resolve) => { release = resolve; });
+  const fakeMemory = {
+    enabled: true,
+    scope: 'agent',
+    stats: () => ({ total: 0, byType: {} }),
+    shouldConsolidate: () => true,
+    async consolidate(args) {
+      captured = args;
+      await blocker;
+      return { stored: [], usage: null, skipped: false };
+    },
+  };
+  const agents = {
+    a: { id: 'a', name: 'Luna 1', apiKey: 'a', model: 'mock', baseUrl: 'http://mock' },
+    b: { id: 'b', name: 'Luna 2', apiKey: 'b', model: 'mock', baseUrl: 'http://mock' },
+  };
+  const room = new MemoryProfiledRoom({
+    roomId: 'default-room',
+    memoryManager: fakeMemory,
+    agents,
+    providerFactory: () => ({ async streamChat() { return { text: 'ok', usage: usage() }; } }),
+  });
+  room.createProviders();
+  room.runId = 'run-old';
+  room.topic = 'old topic';
+  room.history = [{ id: 'old-1', speaker: 'user', name: 'Bạn', text: 'OLD SESSION EVENT' }];
+
+  const queued = room.queueMemoryConsolidation('a', { force: true });
+  room.runId = 'run-new';
+  room.topic = 'new topic';
+  room.history = [{ id: 'new-1', speaker: 'user', name: 'Bạn', text: 'NEW SESSION EVENT' }];
+  room.resetMemoryRuntime(0);
+  release();
+  await queued;
+
+  assert.equal(captured.runId, 'run-old');
+  assert.equal(captured.topic, 'old topic');
+  assert.equal(captured.events.length, 1);
+  assert.match(captured.events[0].text, /OLD SESSION EVENT/);
+  assert.doesNotMatch(captured.events[0].text, /NEW SESSION EVENT/);
 });
