@@ -1,24 +1,23 @@
 const $ = (id) => document.getElementById(id);
 
+const ACTIVE_ACTIVITY = new Set(['queued', 'thinking', 'researching', 'streaming', 'tooling', 'failed']);
 const STATUS_LABELS = {
-  idle: 'Chờ',
-  queued: 'Sắp trả lời',
-  thinking: 'Đang nghĩ',
-  researching: 'Đang tìm web',
-  streaming: 'Đang trả lời',
-  done: 'Sẵn sàng',
-  failed: 'Lỗi',
-  cancelled: 'Đã hủy',
+  queued: 'Sắp trả lời…',
+  thinking: 'Đang suy nghĩ…',
+  researching: 'Đang tìm kiếm web…',
+  streaming: 'Đang trả lời…',
+  tooling: 'Đang dùng công cụ…',
+  failed: 'Gặp lỗi',
 };
 
 let config = null;
 let state = null;
-let agentStates = {};
 let source = null;
 let panel = null;
-let title = null;
-let chips = null;
-let followButton = null;
+let chatObserver = null;
+let historyObserver = null;
+const activityStates = {};
+const clearTimers = new Map();
 
 function ensureStyles() {
   if (document.querySelector('link[href="/parallel-stream-ui.css"]')) return;
@@ -29,93 +28,210 @@ function ensureStyles() {
 }
 
 function ensureUi() {
-  if (panel) return;
   ensureStyles();
-  const research = $('researchStatus');
-  const host = research?.parentElement || document.querySelector('.chat-toolbar > div:first-child');
-  if (!host) return;
+  const chat = $('chat');
+  if (!chat) return;
 
-  panel = document.createElement('div');
-  panel.id = 'parallelLivePanel';
-  panel.className = 'parallel-live-panel hidden';
-  panel.setAttribute('aria-live', 'polite');
-  panel.innerHTML = `
-    <div class="parallel-live-head">
-      <span class="parallel-live-pulse"></span>
-      <strong id="parallelLiveTitle">Song song tự do</strong>
-      <button id="parallelFollowLive" type="button" class="parallel-follow-live hidden">↓ Live</button>
-    </div>
-    <div id="parallelAgentChips" class="parallel-agent-chips"></div>
-  `;
-  host.append(panel);
-  title = $('parallelLiveTitle');
-  chips = $('parallelAgentChips');
-  followButton = $('parallelFollowLive');
-  followButton?.addEventListener('click', () => {
-    const chat = $('chat');
-    if (!chat) return;
-    chat.scrollTo({ top: chat.scrollHeight, behavior: 'smooth' });
-  });
-  $('chat')?.addEventListener('scroll', refreshFollowButton, { passive: true });
+  if (!panel) {
+    panel = document.createElement('section');
+    panel.id = 'agentActivityPanel';
+    panel.className = 'agent-activity-panel hidden';
+    panel.setAttribute('aria-live', 'polite');
+    panel.setAttribute('aria-label', 'Trạng thái hoạt động của AI');
+  }
+
+  if (panel.parentElement !== chat) chat.append(panel);
+  else if (chat.lastElementChild !== panel) chat.append(panel);
+
+  if (!chatObserver) {
+    chatObserver = new MutationObserver(() => {
+      if (!panel || !chat.isConnected) return;
+      if (panel.parentElement !== chat || chat.lastElementChild !== panel) chat.append(panel);
+    });
+    chatObserver.observe(chat, { childList: true });
+  }
+
+  if (!historyObserver) {
+    const banner = $('historyViewBanner');
+    if (banner) {
+      historyObserver = new MutationObserver(render);
+      historyObserver.observe(banner, { attributes: true, attributeFilter: ['class'] });
+    }
+  }
+}
+
+function isViewingHistory() {
+  const banner = $('historyViewBanner');
+  return Boolean(banner && !banner.classList.contains('hidden'));
+}
+
+function agentName(id) {
+  return config?.agents?.[id]?.name || `Agent ${String(id || '').toUpperCase()}`;
+}
+
+function agentInitials(id) {
+  return agentName(id)
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
 }
 
 function activeAgentIds() {
   if (Array.isArray(state?.activeAgents) && state.activeAgents.length) return state.activeAgents;
-  return Object.entries(config?.agents || {}).filter(([, value]) => value?.configured).map(([id]) => id);
+  return Object.entries(config?.agents || {})
+    .filter(([, value]) => value?.configured)
+    .map(([id]) => id);
 }
 
-function currentAgentState(id) {
-  return agentStates[id] || state?.agentStates?.[id] || { status: 'idle' };
+function clearTimer(agentId) {
+  const timer = clearTimers.get(agentId);
+  if (timer) clearTimeout(timer);
+  clearTimers.delete(agentId);
 }
 
-function activeWorkCount() {
-  return activeAgentIds().filter((id) => ['streaming', 'researching', 'thinking', 'queued'].includes(currentAgentState(id).status)).length;
+function setActivity(agentId, status, extra = {}) {
+  if (!agentId || agentId === 'user' || agentId === 'tool') return;
+  clearTimer(agentId);
+  activityStates[agentId] = {
+    ...(activityStates[agentId] || {}),
+    status,
+    detail: extra.detail ?? '',
+    messageId: extra.messageId ?? activityStates[agentId]?.messageId ?? null,
+    error: extra.error ?? '',
+    updatedAt: Date.now(),
+  };
+  render();
 }
 
-function refreshFollowButton() {
-  if (!followButton) return;
-  const chat = $('chat');
-  const count = activeWorkCount();
-  if (!chat || !count) {
-    followButton.classList.add('hidden');
+function clearActivity(agentId, delay = 0) {
+  if (!agentId) return;
+  clearTimer(agentId);
+  if (!delay) {
+    delete activityStates[agentId];
+    render();
     return;
   }
-  const distance = chat.scrollHeight - chat.scrollTop - chat.clientHeight;
-  followButton.classList.toggle('hidden', distance < 160);
-  followButton.textContent = `↓ Live · ${count}`;
+  const timer = setTimeout(() => {
+    clearTimers.delete(agentId);
+    delete activityStates[agentId];
+    render();
+  }, delay);
+  clearTimers.set(agentId, timer);
+}
+
+function clearAllActivities() {
+  for (const timer of clearTimers.values()) clearTimeout(timer);
+  clearTimers.clear();
+  for (const id of Object.keys(activityStates)) delete activityStates[id];
+  render();
+}
+
+function labelFor(info) {
+  return info?.detail || STATUS_LABELS[info?.status] || 'Đang xử lý…';
 }
 
 function render() {
   ensureUi();
   if (!panel) return;
-  const parallel = state?.conversationMode === 'parallel';
-  const active = ['starting', 'running', 'pausing', 'paused'].includes(state?.status);
-  panel.classList.toggle('hidden', !(parallel && active));
-  if (!(parallel && active)) return;
 
-  const count = activeWorkCount();
-  if (state?.status === 'paused') title.textContent = 'Song song tự do · tạm dừng';
-  else if (state?.status === 'pausing') title.textContent = count ? `Đang chờ ${count} AI kết thúc` : 'Đang tạm dừng';
-  else title.textContent = count ? `Song song tự do · ${count} AI đang hoạt động` : 'Song song tự do · sẵn sàng';
-
-  chips.innerHTML = '';
-  for (const id of activeAgentIds()) {
-    const agent = config?.agents?.[id] || { name: `Agent ${id.toUpperCase()}` };
-    const info = currentAgentState(id);
-    const chip = document.createElement('div');
-    chip.className = `parallel-agent-chip status-${info.status || 'idle'}`;
-    chip.dataset.agentId = id;
-    const dot = document.createElement('span');
-    dot.className = 'parallel-agent-dot';
-    const name = document.createElement('b');
-    name.textContent = agent.name || `Agent ${id.toUpperCase()}`;
-    const status = document.createElement('span');
-    status.textContent = STATUS_LABELS[info.status] || info.status || 'Chờ';
-    if (info.error) chip.title = info.error;
-    chip.append(dot, name, status);
-    chips.append(chip);
+  if (isViewingHistory()) {
+    panel.classList.add('hidden');
+    panel.innerHTML = '';
+    return;
   }
-  refreshFollowButton();
+
+  const ids = activeAgentIds().filter((id) => ACTIVE_ACTIVITY.has(activityStates[id]?.status));
+  if (!ids.length) {
+    panel.classList.add('hidden');
+    panel.innerHTML = '';
+    return;
+  }
+
+  panel.classList.remove('hidden');
+  panel.innerHTML = '';
+
+  for (const id of ids) {
+    const info = activityStates[id];
+    const row = document.createElement('div');
+    row.className = `agent-activity-row status-${info.status}`;
+    row.dataset.agentId = id;
+
+    const avatar = document.createElement('div');
+    avatar.className = 'agent-activity-avatar';
+    avatar.textContent = agentInitials(id);
+
+    const copy = document.createElement('div');
+    copy.className = 'agent-activity-copy';
+
+    const name = document.createElement('strong');
+    name.textContent = agentName(id);
+
+    const status = document.createElement('span');
+    status.className = 'agent-activity-text';
+    status.textContent = labelFor(info);
+    if (info.error) status.title = info.error;
+
+    copy.append(name, status);
+    row.append(avatar, copy);
+    panel.append(row);
+  }
+
+  const chat = $('chat');
+  if (chat && chat.lastElementChild !== panel) chat.append(panel);
+  requestAnimationFrame(() => {
+    const current = $('chat');
+    if (!current) return;
+    const distance = current.scrollHeight - current.scrollTop - current.clientHeight;
+    if (distance < 180) current.scrollTop = current.scrollHeight;
+  });
+}
+
+function syncFromState(next) {
+  state = next;
+  if (!next || ['idle', 'stopped', 'completed', 'error'].includes(next.status)) {
+    clearAllActivities();
+    return;
+  }
+
+  if (next.agentStates && typeof next.agentStates === 'object') {
+    for (const [id, info] of Object.entries(next.agentStates)) {
+      const status = info?.status;
+      if (['queued', 'thinking', 'researching', 'streaming'].includes(status)) {
+        const previous = activityStates[id];
+        const preserveDetail = previous?.status === status ? previous.detail : '';
+        setActivity(id, status, {
+          detail: preserveDetail,
+          messageId: info?.messageId || previous?.messageId || null,
+          error: info?.error || '',
+        });
+      } else if (status === 'failed') {
+        setActivity(id, 'failed', { detail: 'Gặp lỗi', error: info?.error || '' });
+        clearActivity(id, 1800);
+      } else if (status === 'cancelled' || status === 'done' || status === 'idle') {
+        clearActivity(id);
+      }
+    }
+  }
+
+  const speakers = Array.isArray(next.currentSpeakers) && next.currentSpeakers.length
+    ? next.currentSpeakers
+    : (next.currentSpeaker ? [next.currentSpeaker] : []);
+
+  if (next.conversationMode !== 'parallel') {
+    const speakerSet = new Set(speakers);
+    for (const id of activeAgentIds()) {
+      if (speakerSet.has(id)) {
+        if (!ACTIVE_ACTIVITY.has(activityStates[id]?.status)) setActivity(id, 'thinking');
+      } else if (activityStates[id]?.status !== 'failed') {
+        clearActivity(id);
+      }
+    }
+  }
+
+  render();
 }
 
 function decorateMessage(data) {
@@ -129,6 +245,20 @@ function decorateMessage(data) {
   });
 }
 
+function activityFromMeta(data) {
+  const text = String(data?.text || '');
+  if (!text) return;
+  for (const id of activeAgentIds()) {
+    const name = agentName(id);
+    if (!text.startsWith(name)) continue;
+    if (/đang dùng tool tạo ảnh/i.test(text)) {
+      setActivity(id, 'tooling', { detail: 'Đang tạo ảnh…' });
+    } else if (/đang tự chọn chủ đề/i.test(text)) {
+      setActivity(id, 'thinking', { detail: 'Đang chọn chủ đề…' });
+    }
+  }
+}
+
 async function init() {
   ensureUi();
   try {
@@ -136,27 +266,96 @@ async function init() {
       fetch('/api/config', { cache: 'no-store' }).then((res) => res.json()),
       fetch('/api/state', { cache: 'no-store' }).then((res) => res.json()),
     ]);
-    agentStates = { ...(state?.agentStates || {}) };
-    render();
+    syncFromState(state);
   } catch {}
 
   source?.close();
   source = new EventSource('/api/events');
-  source.addEventListener('state', (event) => {
-    const next = JSON.parse(event.data);
-    state = next;
-    if (next.agentStates) agentStates = { ...agentStates, ...next.agentStates };
-    render();
-  });
+
+  source.addEventListener('state', (event) => syncFromState(JSON.parse(event.data)));
+
   source.addEventListener('parallel:agent-status', (event) => {
-    const next = JSON.parse(event.data);
-    if (!next.agentId) return;
-    agentStates[next.agentId] = next;
-    render();
+    const data = JSON.parse(event.data);
+    if (!data.agentId) return;
+    if (['queued', 'thinking', 'researching', 'streaming'].includes(data.status)) {
+      const previous = activityStates[data.agentId];
+      setActivity(data.agentId, data.status, {
+        detail: previous?.status === data.status ? previous.detail : '',
+        messageId: data.messageId || null,
+        error: data.error || '',
+      });
+    } else if (data.status === 'failed') {
+      setActivity(data.agentId, 'failed', { detail: 'Gặp lỗi', error: data.error || '' });
+      clearActivity(data.agentId, 1800);
+    } else if (['done', 'cancelled', 'idle'].includes(data.status)) {
+      clearActivity(data.agentId);
+    }
   });
-  source.addEventListener('message:start', (event) => decorateMessage(JSON.parse(event.data)));
-  source.addEventListener('message:done', (event) => decorateMessage(JSON.parse(event.data)));
+
+  source.addEventListener('research:start', (event) => {
+    const data = JSON.parse(event.data);
+    const count = Array.isArray(data.queries) ? data.queries.length : 0;
+    setActivity(data.speaker, 'researching', {
+      detail: count ? `Đang tìm kiếm web · ${count} truy vấn…` : 'Đang tìm kiếm web…',
+    });
+  });
+
+  source.addEventListener('research:done', (event) => {
+    const data = JSON.parse(event.data);
+    const count = Array.isArray(data.sources) ? data.sources.length : 0;
+    setActivity(data.speaker, 'thinking', {
+      detail: count ? `Đã lấy ${count} nguồn · đang tổng hợp…` : 'Đã tìm web · đang tổng hợp…',
+    });
+  });
+
+  source.addEventListener('research:error', (event) => {
+    const data = JSON.parse(event.data);
+    setActivity(data.speaker, 'thinking', {
+      detail: 'Tìm kiếm web thất bại · đang tiếp tục…',
+      error: data.message || '',
+    });
+  });
+
+  source.addEventListener('meta', (event) => activityFromMeta(JSON.parse(event.data)));
+
+  source.addEventListener('message:start', (event) => {
+    const data = JSON.parse(event.data);
+    if (data.speaker !== 'tool' && data.speaker !== 'user') {
+      setActivity(data.speaker, 'streaming', { detail: 'Đang trả lời…', messageId: data.id });
+    }
+    decorateMessage(data);
+  });
+
+  source.addEventListener('message:delta', (event) => {
+    const data = JSON.parse(event.data);
+    if (data.speaker !== 'tool' && data.speaker !== 'user' && activityStates[data.speaker]?.status !== 'streaming') {
+      setActivity(data.speaker, 'streaming', { detail: 'Đang trả lời…', messageId: data.id });
+    }
+  });
+
+  source.addEventListener('message:done', (event) => {
+    const data = JSON.parse(event.data);
+    decorateMessage(data);
+    if (data.speaker !== 'tool' && data.speaker !== 'user') clearActivity(data.speaker, 350);
+  });
+
+  source.addEventListener('message:failed', (event) => {
+    const data = JSON.parse(event.data);
+    setActivity(data.speaker, 'failed', { detail: 'Lượt trả lời gặp lỗi', error: data.message || '' });
+    clearActivity(data.speaker, 1800);
+  });
+
+  source.addEventListener('message:cancelled', (event) => {
+    const data = JSON.parse(event.data);
+    clearActivity(data.speaker);
+  });
 }
 
-window.addEventListener('pagehide', () => source?.close());
+window.addEventListener('pagehide', () => {
+  source?.close();
+  chatObserver?.disconnect();
+  historyObserver?.disconnect();
+  for (const timer of clearTimers.values()) clearTimeout(timer);
+});
+
 init();
