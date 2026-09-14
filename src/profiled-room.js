@@ -15,9 +15,15 @@ function profilePrompt(profile) {
     'Hãy giữ nhất quán danh tính này trong suốt phiên.',
     'Không suy đoán hoặc khẳng định model, provider hay hạ tầng nội bộ của bản thân hoặc người khác nếu thông tin đó không được cung cấp trực tiếp trong hội thoại.',
   ];
-  if (profile.role) parts.push(`Vai trò chính: ${profile.role}`);
-  if (profile.persona) parts.push(`Tính cách: ${profile.persona}`);
-  if (profile.speakingStyle) parts.push(`Kiểu nói: ${profile.speakingStyle}`);
+
+  if (profile.prompt) {
+    parts.push(profile.prompt);
+  } else {
+    if (profile.role) parts.push(`Vai trò chính: ${profile.role}`);
+    if (profile.persona) parts.push(`Tính cách: ${profile.persona}`);
+    if (profile.speakingStyle) parts.push(`Kiểu nói: ${profile.speakingStyle}`);
+  }
+
   return parts.join('\n');
 }
 
@@ -42,6 +48,7 @@ export class ProfiledRoom extends ParallelBatchRoom {
       return [id, {
         id,
         name: cleanText(raw.name, 80) || this.baseAgentNames[id] || `Agent ${id.toUpperCase()}`,
+        prompt: cleanText(raw.prompt, 12000),
         role: cleanText(raw.role, 1200),
         persona: cleanText(raw.persona ?? legacyPersona, 6000),
         speakingStyle: cleanText(raw.speakingStyle, 3000),
