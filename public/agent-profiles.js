@@ -33,6 +33,15 @@ function fieldValue(id) {
   return field ? field.value : undefined;
 }
 
+function legacyPrompt(saved = {}, legacyPersona = '') {
+  const parts = [];
+  if (saved.role) parts.push(`Vai trò chính: ${clean(saved.role, 1200)}`);
+  const persona = saved.persona ?? legacyPersona;
+  if (persona) parts.push(`Tính cách: ${clean(persona, 6000)}`);
+  if (saved.speakingStyle) parts.push(`Kiểu nói: ${clean(saved.speakingStyle, 3000)}`);
+  return parts.join('\n');
+}
+
 export function readAgentProfiles() {
   const stored = storedProfiles();
   const ids = cachedConfig?.agentSlots || ['a', 'b', 'c', 'd'];
@@ -44,20 +53,15 @@ export function readAgentProfiles() {
     const agent = cachedConfig?.agents?.[id] || {};
     const resolvedSavedName = resolveAgentDisplayName(agent, saved.name);
     const name = fieldValue(`profile-${id}-name`);
-    const role = fieldValue(`profile-${id}-role`);
-    const persona = fieldValue(`profile-${id}-persona`);
-    const speakingStyle = fieldValue(`profile-${id}-style`);
+    const prompt = fieldValue(`profile-${id}-prompt`);
     const temperature = fieldValue(`profile-${id}-temperature`);
-    const maxOutputTokens = fieldValue(`profile-${id}-max-tokens`);
+    const legacyPersona = fieldValue(`persona${id.toUpperCase()}`) ?? '';
     if (!cachedConfig?.agents?.[id] && !saved.name && name === undefined) continue;
 
     result[id] = {
       name: clean(name ?? resolvedSavedName ?? agent.name ?? `Agent ${id.toUpperCase()}`, 80),
-      role: clean(role ?? saved.role ?? '', 1200),
-      persona: clean(persona ?? saved.persona ?? '', 6000),
-      speakingStyle: clean(speakingStyle ?? saved.speakingStyle ?? '', 3000),
+      prompt: clean(prompt ?? saved.prompt ?? legacyPrompt(saved, legacyPersona), 12000),
       temperature: clamp(temperature ?? saved.temperature, 0, 2, Number(defaults.temperature ?? 0.8)),
-      maxOutputTokens: Math.floor(clamp(maxOutputTokens ?? saved.maxOutputTokens, 64, 16000, Number(defaults.maxOutputTokens ?? 1200))),
     };
   }
   return result;
@@ -73,7 +77,7 @@ function createStyles() {
   const style = document.createElement('style');
   style.id = 'agentProfileStyles';
   style.textContent = `
-    .agent-profile-shell{display:grid;gap:10px;margin:12px 0 14px}.agent-profile-card{border:1px solid rgba(127,127,127,.16);border-radius:12px;background:rgba(127,127,127,.04);overflow:hidden}.agent-profile-card>summary{display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;padding:12px 13px;font-weight:700}.agent-profile-card>summary::-webkit-details-marker{display:none}.agent-profile-summary-meta{font-size:11px;font-weight:500;opacity:.58}.agent-profile-body{display:grid;gap:10px;padding:0 12px 12px}.agent-profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.agent-profile-card .field{margin:0}.agent-profile-card textarea{resize:vertical}.agent-profile-actions{display:flex;justify-content:flex-end;margin-top:2px}.agent-profile-reset{border:0;background:transparent;color:inherit;opacity:.58;cursor:pointer;font:inherit;font-size:12px;padding:5px 8px;border-radius:7px}.agent-profile-reset:hover{opacity:1;background:rgba(127,127,127,.1)}.agent-profile-hidden{display:none!important}@media(max-width:760px){.agent-profile-grid{grid-template-columns:1fr}}
+    .agent-profile-shell{display:grid;gap:10px;margin:12px 0 14px}.agent-profile-card{border:1px solid rgba(127,127,127,.16);border-radius:12px;background:rgba(127,127,127,.04);overflow:hidden}.agent-profile-card>summary{display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;padding:12px 13px;font-weight:700}.agent-profile-card>summary::-webkit-details-marker{display:none}.agent-profile-summary-meta{font-size:11px;font-weight:500;opacity:.58}.agent-profile-body{display:grid;gap:10px;padding:0 12px 12px}.agent-profile-identity{display:grid;grid-template-columns:minmax(0,1fr) 88px;gap:10px}.agent-profile-card .field{margin:0}.agent-profile-card textarea{resize:vertical}.agent-profile-prompt textarea{min-height:132px;line-height:1.45}.agent-profile-actions{display:flex;justify-content:flex-end;margin-top:2px}.agent-profile-reset{border:0;background:transparent;color:inherit;opacity:.58;cursor:pointer;font:inherit;font-size:12px;padding:5px 8px;border-radius:7px}.agent-profile-reset:hover{opacity:1;background:rgba(127,127,127,.1)}.agent-profile-hidden{display:none!important}@media(max-width:520px){.agent-profile-identity{grid-template-columns:minmax(0,1fr) 82px}}
   `;
   document.head.append(style);
 }
@@ -83,17 +87,14 @@ function profileDefaults(id, config, saved) {
   const resolvedName = resolveAgentDisplayName(config.agents[id], saved.name);
   return {
     name: resolvedName || config.agents[id]?.name || `Agent ${id.toUpperCase()}`,
-    role: saved.role || '',
-    persona: saved.persona ?? legacyPersona,
-    speakingStyle: saved.speakingStyle || '',
+    prompt: saved.prompt ?? legacyPrompt(saved, legacyPersona),
     temperature: saved.temperature ?? config.defaults?.temperature ?? 0.8,
-    maxOutputTokens: saved.maxOutputTokens ?? config.defaults?.maxOutputTokens ?? 1200,
   };
 }
 
-function field(label, control) {
+function field(label, control, className = '') {
   const wrapper = document.createElement('label');
-  wrapper.className = 'field';
+  wrapper.className = `field${className ? ` ${className}` : ''}`;
   const span = document.createElement('span');
   span.textContent = label;
   wrapper.append(span, control);
@@ -109,7 +110,7 @@ function input(type, id, value, extra = {}) {
   return el;
 }
 
-function textarea(id, value, rows = 3, placeholder = '') {
+function textarea(id, value, rows = 6, placeholder = '') {
   const el = document.createElement('textarea');
   el.id = id;
   el.rows = rows;
@@ -136,24 +137,25 @@ function profileCard(id, config, saved) {
 
   const body = document.createElement('div');
   body.className = 'agent-profile-body';
+
   const identityGrid = document.createElement('div');
-  identityGrid.className = 'agent-profile-grid';
+  identityGrid.className = 'agent-profile-identity';
   identityGrid.append(
     field('Name', input('text', `profile-${id}-name`, defaults.name, { maxLength: 80 })),
-    field('Role', input('text', `profile-${id}-role`, defaults.role, { maxLength: 1200, placeholder: 'Ví dụ: phản biện, tổng hợp, sáng tạo...' })),
+    field('Temp', input('number', `profile-${id}-temperature`, defaults.temperature, { min: '0', max: '2', step: '0.1' })),
   );
-  const behaviorGrid = document.createElement('div');
-  behaviorGrid.className = 'agent-profile-grid';
-  behaviorGrid.append(
-    field('Tính cách', textarea(`profile-${id}-persona`, defaults.persona, 4, 'Thói quen suy nghĩ, ưu tiên, thái độ...')),
-    field('Kiểu nói', textarea(`profile-${id}-style`, defaults.speakingStyle, 4, 'Ví dụ: ngắn gọn, hơi mỉa, thiên về ví dụ...')),
+
+  const promptField = field(
+    'Prompt',
+    textarea(
+      `profile-${id}-prompt`,
+      defaults.prompt,
+      7,
+      'Viết toàn bộ chỉ dẫn riêng cho agent này: vai trò, tính cách, cách phản hồi, điều nên hoặc không nên làm...',
+    ),
+    'agent-profile-prompt',
   );
-  const generationGrid = document.createElement('div');
-  generationGrid.className = 'agent-profile-grid';
-  generationGrid.append(
-    field('Temperature', input('number', `profile-${id}-temperature`, defaults.temperature, { min: '0', max: '2', step: '0.1' })),
-    field('Max token/lượt', input('number', `profile-${id}-max-tokens`, defaults.maxOutputTokens, { min: '64', max: '16000', step: '1' })),
-  );
+
   const actions = document.createElement('div');
   actions.className = 'agent-profile-actions';
   const reset = document.createElement('button');
@@ -161,17 +163,15 @@ function profileCard(id, config, saved) {
   reset.className = 'agent-profile-reset';
   reset.textContent = 'Reset profile';
   reset.addEventListener('click', () => {
-    const base = profileDefaults(id, config, {});
-    $(`profile-${id}-name`).value = base.name;
-    $(`profile-${id}-role`).value = '';
-    $(`profile-${id}-persona`).value = '';
-    $(`profile-${id}-style`).value = '';
+    const baseName = resolveAgentDisplayName(config.agents[id]) || config.agents[id]?.name || `Agent ${id.toUpperCase()}`;
+    $(`profile-${id}-name`).value = baseName;
+    $(`profile-${id}-prompt`).value = '';
     $(`profile-${id}-temperature`).value = config.defaults?.temperature ?? 0.8;
-    $(`profile-${id}-max-tokens`).value = config.defaults?.maxOutputTokens ?? 1200;
     persistProfiles();
   });
   actions.append(reset);
-  body.append(identityGrid, behaviorGrid, generationGrid, actions);
+
+  body.append(identityGrid, promptField, actions);
   details.append(summary, body);
 
   for (const control of body.querySelectorAll('input,textarea')) {
@@ -206,29 +206,11 @@ function syncSurfaceLabels() {
     const card = total?.closest('.mini-stat');
     if (card) {
       setTextIfChanged(card.querySelector(':scope > span'), profile.name || `Agent ${upper}`);
-      setTextIfChanged(card.querySelector('small > span'), profile.role || 'profile riêng');
+      setTextIfChanged(card.querySelector('small > span'), `Temp ${profile.temperature}`);
     }
     const option = [...($('startSpeaker')?.options || [])].find((item) => item.value === id);
     setTextIfChanged(option, profile.name || `Agent ${upper}`);
   }
-}
-
-function syncLegacyPersona(id) {
-  const legacy = $(`persona${id.toUpperCase()}`);
-  const profileField = $(`profile-${id}-persona`);
-  if (!legacy || !profileField) return;
-  legacy.addEventListener('input', () => {
-    if (profileField.value !== legacy.value) {
-      profileField.value = legacy.value;
-      persistProfiles();
-    }
-  });
-  legacy.addEventListener('change', () => {
-    if (profileField.value !== legacy.value) {
-      profileField.value = legacy.value;
-      persistProfiles();
-    }
-  });
 }
 
 async function initAgentProfiles() {
@@ -258,7 +240,6 @@ async function initAgentProfiles() {
   const buttons = promptPanel.querySelector('.two-cols');
   promptPanel.insertBefore(shell, buttons || null);
   hideLegacyControls();
-  for (const id of cachedConfig.agentSlots || []) syncLegacyPersona(id);
   persistProfiles();
   syncSurfaceLabels();
 
