@@ -310,7 +310,8 @@ export class SqliteMemoryStore {
         + typeBonus;
       if (queryTokens.length && relevance === 0) score *= 0.55;
       return { row, score, relevance };
-    }).sort((a, b) => b.score - a.score || b.relevance - a.relevance)
+    }).filter((item) => !queryTokens.length || item.relevance > 0 || item.score >= 0.22)
+      .sort((a, b) => b.score - a.score || b.relevance - a.relevance)
       .slice(0, Math.max(1, Math.min(50, Math.floor(Number(limit) || 8))));
 
     const touchedAt = new Date().toISOString();
