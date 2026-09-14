@@ -10,19 +10,20 @@ import {
   getDeepResearchConfig,
   getImageGenConfig,
   getImageInputConfig,
+  getMemoryConfig,
   getPublicConfig,
   getServerConfig,
   getWebSearchConfig,
 } from './config.js';
+import { AgentMemoryManager } from './agent-memory.js';
 import { CloudflareImageTool } from './cloudflare-image-tool.js';
 import { createImageContextResolver } from './image-context.js';
 import { OpenAICompatibleImageTool } from './image-tool.js';
-import { ProfiledRoom } from './profiled-room.js';
+import { MemoryProfiledRoom } from './memory-profiled-room.js';
+import { SqliteMemoryStore } from './memory-store.js';
 import { RoomManager } from './room-manager.js';
 import { resolveRequestRoomId } from './room-routing.js';
 import { TavilyWebSearch } from './web-search.js';
-
-// ProfiledRoom keeps the free-running parallel scheduler while adding per-agent profiles.
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = normalize(join(__dirname, '..', 'public'));
@@ -31,10 +32,13 @@ const webSearchConfig = getWebSearchConfig();
 const webSearch = webSearchConfig.enabled ? new TavilyWebSearch(webSearchConfig) : null;
 const deepResearchConfig = getDeepResearchConfig();
 const contextConfig = getContextConfig();
+const memoryConfig = getMemoryConfig();
 const imageGenConfig = getImageGenConfig();
 const imageInputConfig = getImageInputConfig();
 const agentToolConfig = getAgentToolConfig();
 const configuredAgents = getConfiguredAgentConfigs();
+const memoryStore = memoryConfig.enabled ? new SqliteMemoryStore({ path: memoryConfig.dbPath }) : null;
+const memoryManager = memoryStore ? new AgentMemoryManager({ store: memoryStore, config: memoryConfig }) : null;
 
 function createImageTool(config) {
   if (!config.enabled) return null;
@@ -79,7 +83,9 @@ const manager = new RoomManager({
   maxRooms: serverConfig.maxRooms,
   roomTtlMs: serverConfig.roomTtlMs,
   createRoom(roomId) {
-    const room = new ProfiledRoom({
+    const room = new MemoryProfiledRoom({
+      roomId,
+      memoryManager,
       agents: configuredAgents,
       hardTurnLimit: serverConfig.hardTurnLimit,
       webSearch,
@@ -171,6 +177,8 @@ async function handleApi(req, res, url) {
       activeAgents: Object.keys(configuredAgents),
       webSearch: Boolean(webSearch),
       deepResearch: Boolean(webSearch && deepResearchConfig.enabled),
+      memory: Boolean(memoryManager),
+      memoryScope: memoryManager?.scope || null,
       imageGen: Boolean(imageTool),
       imageProvider: imageTool ? imageGenConfig.provider : null,
       imageInput: Boolean(imageContextResolver),
@@ -290,6 +298,7 @@ cleanup.unref?.();
 server.on('close', () => {
   clearInterval(heartbeat);
   clearInterval(cleanup);
+  try { memoryStore?.close?.(); } catch {}
 });
 
 server.listen(serverConfig.port, serverConfig.host, () => {
@@ -297,5 +306,6 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   console.log(`AI Conversation Lab: http://${serverConfig.host}:${serverConfig.port}`);
   console.log(`Agents: ${active}`);
   console.log(`Web search: ${webSearch ? 'enabled (tavily)' : 'disabled'}${webSearch && deepResearchConfig.enabled ? ' + deep-read' : ''}`);
+  console.log(`Agent memory: ${memoryManager ? `enabled (${memoryManager.scope}, ${memoryConfig.dbPath})` : 'disabled'}`);
   console.log(`Multi-room: ${serverConfig.multiRoomEnabled ? `enabled (max ${serverConfig.maxRooms})` : 'disabled (default-room only)'}`);
 });

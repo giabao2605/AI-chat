@@ -104,6 +104,21 @@ export function getContextConfig() {
   };
 }
 
+export function getMemoryConfig() {
+  const scope = String(process.env.AGENT_MEMORY_SCOPE || 'agent').trim().toLowerCase();
+  return {
+    enabled: boolFromEnv('AGENT_MEMORY_ENABLED', true),
+    dbPath: String(process.env.AGENT_MEMORY_DB_PATH || './data/agent-memory.sqlite').trim(),
+    scope: scope === 'room' ? 'room' : 'agent',
+    retrievalLimit: Math.max(1, Math.min(30, intFromEnv('AGENT_MEMORY_RETRIEVAL_LIMIT', 8))),
+    contextMaxChars: Math.max(1200, Math.min(30000, intFromEnv('AGENT_MEMORY_CONTEXT_MAX_CHARS', 6500))),
+    consolidateEveryMessages: Math.max(1, Math.min(100, intFromEnv('AGENT_MEMORY_CONSOLIDATE_EVERY_MESSAGES', 16))),
+    maxCandidatesPerPass: Math.max(1, Math.min(20, intFromEnv('AGENT_MEMORY_MAX_CANDIDATES_PER_PASS', 6))),
+    minImportance: Math.max(0, Math.min(1, Number(process.env.AGENT_MEMORY_MIN_IMPORTANCE || 0.35))),
+    maxItemChars: Math.max(300, Math.min(5000, intFromEnv('AGENT_MEMORY_MAX_ITEM_CHARS', 1800))),
+  };
+}
+
 export function getImageGenConfig() {
   const provider = String(process.env.IMAGE_GEN_PROVIDER || 'openai-compatible').trim().toLowerCase();
   const apiKey = String(process.env.IMAGE_GEN_API_KEY || '').trim();
@@ -177,6 +192,7 @@ export function getPublicConfig() {
   const imageInput = getImageInputConfig();
   const agentTools = getAgentToolConfig();
   const context = getContextConfig();
+  const memory = getMemoryConfig();
   return {
     agents,
     agentSlots: AGENT_IDS,
@@ -205,6 +221,11 @@ export function getPublicConfig() {
     context: {
       recentMessages: context.recentMessages,
       summarizeAfter: context.summarizeAfter,
+    },
+    memory: {
+      enabled: memory.enabled,
+      scope: memory.scope,
+      retrievalLimit: memory.retrievalLimit,
     },
     defaults: {
       sharedPrompt: DEFAULT_SHARED_PROMPT,
