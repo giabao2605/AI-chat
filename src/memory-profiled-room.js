@@ -10,12 +10,23 @@ function insertMemoryDataMessage(messages, content) {
   return next;
 }
 
+function memoryEventSnapshot(item = {}) {
+  return {
+    id: String(item.id || '').slice(0, 240),
+    speaker: String(item.speaker || '').slice(0, 80),
+    name: String(item.name || '').slice(0, 240),
+    text: String(item.text || '').slice(0, 100000),
+    createdAt: String(item.createdAt || '').slice(0, 100),
+  };
+}
+
 export class MemoryProfiledRoom extends ProfiledRoom {
   constructor(options = {}) {
     super(options);
     this.roomId = String(options.roomId || 'default-room');
     this.memoryManager = options.memoryManager || null;
     this.memoryProviders = {};
+    this.memoryGeneration = 0;
     this.memoryCursors = Object.fromEntries(this.agentIds.map((id) => [id, 0]));
     this.memoryQueues = Object.fromEntries(this.agentIds.map((id) => [id, Promise.resolve()]));
     this.memoryStatsCache = Object.fromEntries(this.agentIds.map((id) => [id, { total: 0, byType: {} }]));
@@ -28,6 +39,7 @@ export class MemoryProfiledRoom extends ProfiledRoom {
   }
 
   resetMemoryRuntime(cursor = 0) {
+    this.memoryGeneration = Math.max(0, Number(this.memoryGeneration) || 0) + 1;
     this.memoryCursors = Object.fromEntries(this.agentIds.map((id) => [id, Math.max(0, Number(cursor) || 0)]));
     this.memoryQueues = Object.fromEntries(this.agentIds.map((id) => [id, Promise.resolve()]));
     this.lastMemoryRetrieval = Object.fromEntries(this.agentIds.map((id) => [id, { count: 0, at: null }]));
@@ -44,6 +56,16 @@ export class MemoryProfiledRoom extends ProfiledRoom {
         this.recordDebug?.('memory:stats-error', { agentId: id, message: error?.message || String(error) });
       }
     }
+  }
+
+  reset() {
+    const initialized = Object.prototype.hasOwnProperty.call(this, 'memoryManager');
+    if (initialized && this.memoryEnabled() && Array.isArray(this.history) && this.history.length) {
+      this.flushMemoryConsolidation();
+    }
+    const result = super.reset();
+    if (initialized) this.resetMemoryRuntime(0);
+    return result;
   }
 
   async start(input = {}) {
@@ -135,51 +157,83 @@ export class MemoryProfiledRoom extends ProfiledRoom {
   }
 
   queueMemoryConsolidation(agentId, { force = false } = {}) {
-    if (!this.memoryEnabled() || !this.agentIds.includes(agentId)) return;
+    if (!this.memoryEnabled() || !this.agentIds.includes(agentId)) return null;
+
+    const start = Math.max(0, Number(this.memoryCursors[agentId]) || 0);
+    const end = this.history.length;
+    const count = Math.max(0, end - start);
+    if (!this.memoryManager.shouldConsolidate(count, { force })) return null;
+
+    const events = this.history.slice(start, end).map(memoryEventSnapshot);
+    if (!events.length) {
+      this.memoryCursors[agentId] = end;
+      return null;
+    }
+
+    const provider = this.memoryProviders[agentId];
+    if (!provider) return null;
+
+    // Reserve the range synchronously. The queued task uses only this immutable snapshot,
+    // so a reset/new session can never make old consolidation read the new room history.
+    this.memoryCursors[agentId] = end;
+    const generation = this.memoryGeneration;
+    const scheduledRunId = this.runId;
+    const scheduledTopic = this.topic;
+    const scheduledPersona = this.settings?.personas?.[agentId] || '';
     const previous = this.memoryQueues[agentId] || Promise.resolve();
+
     const task = previous.then(async () => {
-      const start = Math.max(0, Number(this.memoryCursors[agentId]) || 0);
-      const end = this.history.length;
-      const count = Math.max(0, end - start);
-      if (!this.memoryManager.shouldConsolidate(count, { force })) return;
-      const events = this.history.slice(start, end);
-      if (!events.length) {
-        this.memoryCursors[agentId] = end;
+      let result = null;
+      let lastError = null;
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        try {
+          result = await this.memoryManager.consolidate({
+            agentId,
+            agentName: this.agentConfigs[agentId]?.name || agentId,
+            persona: scheduledPersona,
+            provider,
+            events,
+            roomId: this.roomId,
+            runId: scheduledRunId,
+            topic: scheduledTopic,
+          });
+          lastError = null;
+          break;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      const stillCurrent = this.memoryGeneration === generation && this.runId === scheduledRunId;
+      if (lastError) {
+        if (stillCurrent) {
+          this.recordDebug('memory:consolidation-error', {
+            agentId,
+            runId: scheduledRunId,
+            fromIndex: start,
+            toIndex: end,
+            message: lastError?.message || String(lastError),
+          });
+        }
         return;
       }
 
-      const provider = this.memoryProviders[agentId];
-      if (!provider) return;
-      try {
-        const result = await this.memoryManager.consolidate({
-          agentId,
-          agentName: this.agentConfigs[agentId]?.name || agentId,
-          provider,
-          events,
-          roomId: this.roomId,
-          runId: this.runId,
-          topic: this.topic,
-        });
-        this.memoryCursors[agentId] = end;
-        if (result.usage) this.addUsage(agentId, result.usage, false);
-        this.refreshMemoryStats(agentId);
+      if (result?.usage && stillCurrent) this.addUsage(agentId, result.usage, false);
+      this.refreshMemoryStats(agentId);
+      if (stillCurrent) {
         this.recordDebug('memory:consolidated', {
           agentId,
+          runId: scheduledRunId,
           fromIndex: start,
           toIndex: end,
           eventCount: events.length,
-          stored: result.stored?.length || 0,
-        });
-      } catch (error) {
-        this.recordDebug('memory:consolidation-error', {
-          agentId,
-          fromIndex: start,
-          toIndex: end,
-          message: error?.message || String(error),
+          stored: result?.stored?.length || 0,
         });
       }
     });
+
     this.memoryQueues[agentId] = task.catch(() => {});
+    return this.memoryQueues[agentId];
   }
 
   flushMemoryConsolidation() {
