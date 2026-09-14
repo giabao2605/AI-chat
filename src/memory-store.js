@@ -22,12 +22,18 @@ function normalizeText(value) {
     .toLowerCase();
 }
 
-function searchTokens(value) {
-  return new Set(String(value || '')
+function normalizeSearchText(value) {
+  return cleanText(value, 12000)
     .normalize('NFKD')
     .replace(/\p{M}/gu, '')
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function searchTokens(value) {
+  return new Set(normalizeSearchText(value)
     .split(/\s+/)
     .filter((token) => token.length > 1)
     .slice(0, 300));
@@ -99,6 +105,7 @@ export class SqliteMemoryStore {
         memory_key TEXT,
         content TEXT NOT NULL,
         normalized_content TEXT NOT NULL,
+        search_content TEXT NOT NULL DEFAULT '',
         importance REAL NOT NULL DEFAULT 0.5,
         confidence REAL NOT NULL DEFAULT 0.5,
         visibility TEXT NOT NULL DEFAULT 'private',
@@ -115,6 +122,8 @@ export class SqliteMemoryStore {
       );
       CREATE INDEX IF NOT EXISTS idx_agent_memories_lookup
         ON agent_memories(agent_id, namespace, active, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_agent_memories_importance
+        ON agent_memories(agent_id, namespace, active, importance DESC, confidence DESC);
       CREATE INDEX IF NOT EXISTS idx_agent_memories_type
         ON agent_memories(agent_id, namespace, memory_type, active);
       CREATE INDEX IF NOT EXISTS idx_agent_memories_key
@@ -122,6 +131,12 @@ export class SqliteMemoryStore {
       CREATE INDEX IF NOT EXISTS idx_agent_memories_source
         ON agent_memories(source_type, source_id);
     `);
+
+    // Forward-compatible migration for databases created by an earlier memory prototype.
+    const columns = new Set(this.db.prepare('PRAGMA table_info(agent_memories)').all().map((row) => row.name));
+    if (!columns.has('search_content')) {
+      this.db.exec("ALTER TABLE agent_memories ADD COLUMN search_content TEXT NOT NULL DEFAULT '';");
+    }
   }
 
   close() {
@@ -134,6 +149,7 @@ export class SqliteMemoryStore {
     const type = cleanText(memory.type || 'episodic', 40).toLowerCase();
     const content = cleanText(memory.content, Number(memory.maxContentLength) || 8000);
     const normalizedContent = normalizeText(content);
+    const searchContent = normalizeSearchText(`${content} ${memory.key || ''}`);
     const key = cleanText(memory.key, 240).toLowerCase() || null;
     if (!agentId) throw new Error('Memory thiếu agentId.');
     if (!namespace) throw new Error('Memory thiếu namespace.');
@@ -169,11 +185,12 @@ export class SqliteMemoryStore {
       const oldMetadata = safeJsonParse(existing.metadata_json, {});
       this.db.prepare(`
         UPDATE agent_memories
-        SET content = ?, importance = ?, confidence = ?, visibility = ?, source_type = ?, source_id = ?,
+        SET content = ?, search_content = ?, importance = ?, confidence = ?, visibility = ?, source_type = ?, source_id = ?,
             run_id = ?, metadata_json = ?, updated_at = ?
         WHERE id = ?
       `).run(
         content,
+        searchContent,
         Math.max(Number(existing.importance || 0), importance),
         confidence,
         visibility,
@@ -196,10 +213,10 @@ export class SqliteMemoryStore {
     const id = cleanText(memory.id, 240) || randomUUID();
     this.db.prepare(`
       INSERT INTO agent_memories (
-        id, agent_id, namespace, memory_type, memory_key, content, normalized_content,
+        id, agent_id, namespace, memory_type, memory_key, content, normalized_content, search_content,
         importance, confidence, visibility, source_type, source_id, run_id, supersedes_id,
         metadata_json, created_at, updated_at, active
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
     `).run(
       id,
       agentId,
@@ -208,6 +225,7 @@ export class SqliteMemoryStore {
       key,
       content,
       normalizedContent,
+      searchContent,
       importance,
       confidence,
       visibility,
@@ -222,40 +240,77 @@ export class SqliteMemoryStore {
     return toRecord(this.db.prepare('SELECT * FROM agent_memories WHERE id = ?').get(id));
   }
 
-  retrieve(agentId, { namespaces = ['agent'], query = '', limit = 8, candidateLimit = 240, types = null } = {}) {
+  retrieve(agentId, {
+    namespaces = ['agent'],
+    query = '',
+    limit = 8,
+    candidateLimit = 180,
+    types = null,
+    excludePrivateRunId = '',
+  } = {}) {
     const cleanAgentId = cleanText(agentId, 80).toLowerCase();
     const cleanNamespaces = [...new Set((Array.isArray(namespaces) ? namespaces : [namespaces])
       .map((item) => cleanText(item, 180)).filter(Boolean))];
     if (!cleanAgentId || !cleanNamespaces.length) return [];
 
-    const params = [cleanAgentId, ...cleanNamespaces];
-    let sql = `SELECT * FROM agent_memories WHERE agent_id = ? AND namespace IN (${placeholders(cleanNamespaces.length)}) AND active = 1`;
-    if (Array.isArray(types) && types.length) {
-      const cleanTypes = types.map((item) => cleanText(item, 40).toLowerCase()).filter((item) => MEMORY_TYPES.has(item));
-      if (cleanTypes.length) {
-        sql += ` AND memory_type IN (${placeholders(cleanTypes.length)})`;
-        params.push(...cleanTypes);
-      }
+    const cleanTypes = Array.isArray(types)
+      ? types.map((item) => cleanText(item, 40).toLowerCase()).filter((item) => MEMORY_TYPES.has(item))
+      : [];
+    const cleanExcludedRun = cleanText(excludePrivateRunId, 240);
+    const baseParams = [cleanAgentId, ...cleanNamespaces];
+    let where = `agent_id = ? AND namespace IN (${placeholders(cleanNamespaces.length)}) AND active = 1`;
+    if (cleanTypes.length) {
+      where += ` AND memory_type IN (${placeholders(cleanTypes.length)})`;
+      baseParams.push(...cleanTypes);
     }
-    sql += ' ORDER BY updated_at DESC LIMIT ?';
-    params.push(Math.max(20, Math.min(1000, Math.floor(Number(candidateLimit) || 240))));
-    const rows = this.db.prepare(sql).all(...params);
+    if (cleanExcludedRun) {
+      where += " AND NOT (memory_type = 'private' AND run_id = ?)";
+      baseParams.push(cleanExcludedRun);
+    }
+
+    const perPool = Math.max(30, Math.min(500, Math.floor(Number(candidateLimit) || 180)));
+    const candidates = new Map();
+    const addRows = (rows) => {
+      for (const row of rows) candidates.set(row.id, row);
+    };
+    const selectPool = (orderBy, poolLimit = perPool) => this.db.prepare(
+      `SELECT * FROM agent_memories WHERE ${where} ORDER BY ${orderBy} LIMIT ?`,
+    ).all(...baseParams, poolLimit);
+
+    addRows(selectPool('updated_at DESC'));
+    addRows(selectPool('importance DESC, confidence DESC, updated_at DESC', Math.max(30, Math.floor(perPool * 0.65))));
+    addRows(selectPool('access_count DESC, last_accessed_at DESC, updated_at DESC', Math.max(20, Math.floor(perPool * 0.35))));
+
+    const queryTokens = [...searchTokens(query)]
+      .filter((token) => token.length >= 3)
+      .sort((a, b) => b.length - a.length)
+      .slice(0, 8);
+    if (queryTokens.length) {
+      const clauses = queryTokens.map(() => 'search_content LIKE ?').join(' OR ');
+      const params = [...baseParams, ...queryTokens.map((token) => `%${token}%`), perPool];
+      const rows = this.db.prepare(
+        `SELECT * FROM agent_memories WHERE ${where} AND (${clauses}) ORDER BY importance DESC, updated_at DESC LIMIT ?`,
+      ).all(...params);
+      addRows(rows);
+    }
+
     const now = Date.now();
-    const scored = rows.map((row) => {
+    const scored = [...candidates.values()].map((row) => {
       const updated = Date.parse(row.updated_at || row.created_at || '') || now;
       const ageDays = Math.max(0, (now - updated) / 86_400_000);
-      const recency = Math.exp(-ageDays / 90);
+      const recency = Math.exp(-ageDays / 120);
       const access = Math.min(1, Math.log1p(Number(row.access_count || 0)) / Math.log(12));
       const relevance = lexicalSimilarity(query, `${row.content} ${row.memory_key || ''}`);
-      const typeBonus = row.memory_type === 'private' ? 0.05 : row.memory_type === 'relationship' ? 0.035 : 0;
-      const score = relevance * 0.50
-        + clamp(row.importance, 0, 1, 0.5) * 0.22
-        + clamp(row.confidence, 0, 1, 0.5) * 0.10
-        + recency * 0.10
-        + access * 0.03
+      const typeBonus = row.memory_type === 'relationship' ? 0.025 : row.memory_type === 'procedural' ? 0.02 : 0;
+      let score = relevance * 0.62
+        + clamp(row.importance, 0, 1, 0.5) * 0.17
+        + clamp(row.confidence, 0, 1, 0.5) * 0.07
+        + recency * 0.08
+        + access * 0.04
         + typeBonus;
-      return { row, score };
-    }).sort((a, b) => b.score - a.score)
+      if (queryTokens.length && relevance === 0) score *= 0.55;
+      return { row, score, relevance };
+    }).sort((a, b) => b.score - a.score || b.relevance - a.relevance)
       .slice(0, Math.max(1, Math.min(50, Math.floor(Number(limit) || 8))));
 
     const touchedAt = new Date().toISOString();
