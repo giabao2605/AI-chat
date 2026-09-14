@@ -1,4 +1,10 @@
-import { HISTORY_STORAGE_KEY, parseStoredHistory } from './history.js';
+import {
+  HISTORY_DELETED_STORAGE_KEY,
+  HISTORY_STORAGE_KEY,
+  filterDeletedHistory,
+  parseDeletedHistory,
+  parseStoredHistory,
+} from './history.js';
 import { getHistoryResumePlan } from './history-resume.js';
 
 const $ = (id) => document.getElementById(id);
@@ -32,7 +38,8 @@ if (historyList && banner && returnLiveBtn && maxTurnsInput && roomStatus) {
   banner.insertBefore(resumeBtn, returnLiveBtn);
 
   function records() {
-    return parseStoredHistory(localStorage.getItem(HISTORY_STORAGE_KEY));
+    const deleted = parseDeletedHistory(localStorage.getItem(HISTORY_DELETED_STORAGE_KEY));
+    return filterDeletedHistory(parseStoredHistory(localStorage.getItem(HISTORY_STORAGE_KEY)), deleted);
   }
 
   function selectedSession() {
