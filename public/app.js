@@ -1,4 +1,14 @@
-import { HISTORY_LIMIT, HISTORY_STORAGE_KEY, parseStoredHistory, removeHistoryRecord, upsertHistory } from './history.js';
+import {
+  HISTORY_DELETED_STORAGE_KEY,
+  HISTORY_LIMIT,
+  HISTORY_STORAGE_KEY,
+  addDeletedHistoryRunIds,
+  filterDeletedHistory,
+  parseDeletedHistory,
+  parseStoredHistory,
+  removeHistoryRecord,
+  upsertHistory,
+} from './history.js';
 import { getComposerMode } from './composer-mode.js';
 
 const $ = (id) => document.getElementById(id);
@@ -23,7 +33,8 @@ let eventSource;
 let toastTimer;
 let viewingHistoryId = null;
 let composerSubmitting = false;
-let savedSessions = parseStoredHistory(localStorage.getItem(HISTORY_STORAGE_KEY));
+let deletedHistoryRunIds = parseDeletedHistory(localStorage.getItem(HISTORY_DELETED_STORAGE_KEY));
+let savedSessions = filterDeletedHistory(parseStoredHistory(localStorage.getItem(HISTORY_STORAGE_KEY)), deletedHistoryRunIds);
 let followTail = true;
 const streamNodes = new Map();
 
@@ -189,8 +200,24 @@ function persistSavedSessions() {
   return false;
 }
 
+function persistDeletedHistory() {
+  try {
+    if (deletedHistoryRunIds.length) localStorage.setItem(HISTORY_DELETED_STORAGE_KEY, JSON.stringify(deletedHistoryRunIds));
+    else localStorage.removeItem(HISTORY_DELETED_STORAGE_KEY);
+    return true;
+  } catch {
+    toast('Không thể lưu trạng thái xóa lịch sử trên trình duyệt này.');
+    return false;
+  }
+}
+
+function suppressHistoryRuns(runIds) {
+  deletedHistoryRunIds = addDeletedHistoryRunIds(deletedHistoryRunIds, runIds);
+  persistDeletedHistory();
+}
+
 function saveCurrentSnapshot(snapshot) {
-  const next = upsertHistory(savedSessions, snapshot, new Date().toISOString(), HISTORY_LIMIT);
+  const next = upsertHistory(savedSessions, snapshot, new Date().toISOString(), HISTORY_LIMIT, deletedHistoryRunIds);
   if (next === savedSessions || JSON.stringify(next) === JSON.stringify(savedSessions)) return;
   savedSessions = next;
   persistSavedSessions();
@@ -228,6 +255,7 @@ function renderHistoryList() {
     deleteButton.textContent = '×';
     deleteButton.addEventListener('click', (event) => {
       event.stopPropagation();
+      suppressHistoryRuns([session.runId]);
       savedSessions = removeHistoryRecord(savedSessions, session.runId);
       persistSavedSessions();
       if (viewingHistoryId === session.runId) returnToLive();
@@ -502,6 +530,9 @@ els.returnLiveBtn.addEventListener('click', returnToLive);
 els.clearHistoryBtn.addEventListener('click', () => {
   if (!savedSessions.length) return;
   if (!window.confirm('Xóa toàn bộ lịch sử trò chuyện trên trình duyệt này?')) return;
+  const deletedRunIds = savedSessions.map((session) => session.runId);
+  if (state?.runId && state?.topic && Array.isArray(state.history) && state.history.length) deletedRunIds.push(state.runId);
+  suppressHistoryRuns(deletedRunIds);
   savedSessions = [];
   localStorage.removeItem(HISTORY_STORAGE_KEY);
   if (viewingHistoryId) returnToLive();
