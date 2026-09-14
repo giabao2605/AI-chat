@@ -1,0 +1,118 @@
+/* Final accent layer: replace the violet treatment with a calm light-blue palette. */
+:root {
+  --a: #7fbaff;
+  --b: #8fd0ff;
+  --accent: #73b7ff;
+  --accent-strong: #9ed4ff;
+  --accent-blue: #62a9f7;
+  --accent-cyan: #63d7ef;
+  --accent-soft: rgba(115, 183, 255, .14);
+  --accent-ring: rgba(115, 183, 255, .2);
+  --accent-a-soft: rgba(98, 169, 247, .14);
+  --accent-b-soft: rgba(103, 193, 247, .14);
+}
+
+body {
+  background:
+    radial-gradient(900px 520px at 64% -18%, rgba(88, 170, 246, .15), transparent 67%),
+    radial-gradient(720px 480px at 9% 6%, rgba(83, 141, 220, .11), transparent 70%),
+    radial-gradient(640px 420px at 94% 82%, rgba(58, 172, 196, .055), transparent 72%),
+    linear-gradient(180deg, #090b11 0%, #07090d 100%);
+}
+
+::selection {
+  background: rgba(115, 183, 255, .34);
+}
+
+.sidebar-fold[open] > summary::after {
+  color: #9ed4ff;
+}
+
+.history-count {
+  background: rgba(115, 183, 255, .13);
+  color: #c9e6ff;
+}
+
+.field textarea:focus,
+.field input:focus,
+.field select:focus,
+.composer input:focus,
+textarea:focus,
+select:focus,
+input:focus {
+  border-color: rgba(115, 183, 255, .64);
+}
+
+.button.primary,
+.empty-state-v2 .empty-action.primary {
+  border-color: rgba(121, 190, 255, .66);
+  background: linear-gradient(135deg, #5e9ff0 0%, #68b3f5 52%, #75c5f2 100%);
+  box-shadow: 0 8px 24px rgba(56, 135, 212, .22), inset 0 1px 0 rgba(255, 255, 255, .18);
+}
+
+.button.primary:hover:not(:disabled),
+.empty-state-v2 .empty-action.primary:hover:not(:disabled) {
+  border-color: rgba(159, 213, 255, .86);
+  background: linear-gradient(135deg, #69adf8 0%, #76c1ff 55%, #83d0f8 100%);
+  box-shadow: 0 10px 28px rgba(56, 135, 212, .28), inset 0 1px 0 rgba(255, 255, 255, .22);
+}
+
+.button:focus-visible,
+.icon-button:focus-visible,
+.empty-state-v2 .empty-action:focus-visible,
+.empty-state-v2 .empty-chip:focus-visible,
+.history-item:focus-visible {
+  outline-color: rgba(145, 207, 255, .86);
+}
+
+.empty-state-v2::before {
+  background:
+    radial-gradient(circle at 42% 40%, rgba(83, 164, 241, .13), transparent 45%),
+    radial-gradient(circle at 67% 58%, rgba(83, 198, 229, .075), transparent 42%);
+}
+
+.empty-state-v2 .empty-kicker::before {
+  background: linear-gradient(90deg, #69adf8, #79c8f4);
+}
+
+.empty-state-v2 .empty-chip:hover:not(:disabled) {
+  border-color: rgba(115, 183, 255, .24);
+  background: rgba(115, 183, 255, .065);
+  color: #cce9ff;
+}
+
+.message.a .message-meta b {
+  color: #9fc5ff;
+}
+
+.message.b .message-meta b {
+  color: #a5dcff;
+}
+
+.message.a .avatar {
+  background: rgba(83, 143, 224, .12);
+  color: #8fbbff;
+}
+
+.message.b .avatar {
+  background: rgba(76, 165, 220, .12);
+  color: #a4dcff;
+}
+
+.history-item.active {
+  border-color: rgba(105, 177, 241, .42);
+  background: rgba(90, 165, 233, .09);
+}
+
+.history-view-banner {
+  border-bottom-color: rgba(115, 183, 255, .19);
+  background: rgba(115, 183, 255, .06);
+}
+
+.expand-control-button span {
+  color: #8acbff;
+}
+
+.expand-control-button:hover {
+  border-color: rgba(126, 195, 255, .46);
+}
