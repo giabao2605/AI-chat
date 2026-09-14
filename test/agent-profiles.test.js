@@ -84,6 +84,58 @@ test('agent profile changes identity prompt and generation settings without chan
   assert.equal(snapshot.agentProfiles.b.name, 'Atlas');
 });
 
+test('unified prompt takes precedence over legacy profile fields', async () => {
+  const calls = [];
+  const providerFactory = () => ({
+    async streamChat(options) {
+      calls.push(options);
+      options.onDelta?.('ok');
+      return { text: 'ok', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, exact: true }, toolCalls: [] };
+    },
+  });
+
+  const room = new ProfiledRoom({
+    agents: agents(),
+    providerFactory,
+    hardTurnLimit: 2,
+    contextConfig: { summarizeAfter: 100 },
+  });
+
+  const done = waitForEvent(room, 'message:done');
+  await room.start({
+    topicMode: 'manual',
+    topic: 'Prompt mới',
+    maxTurns: 1,
+    startSpeaker: 'a',
+    temperature: 0.8,
+    maxOutputTokens: 1200,
+    agentProfiles: {
+      a: {
+        name: 'Luna 1',
+        prompt: 'Bạn là quản trò. Điều phối cuộc chơi, giữ nhịp và chỉ nói phần của chính bạn.',
+        role: 'legacy role',
+        persona: 'legacy persona',
+        speakingStyle: 'legacy style',
+        temperature: 0.6,
+      },
+    },
+  });
+  await done;
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].temperature, 0.6);
+  assert.equal(calls[0].maxOutputTokens, 1200);
+
+  const system = String(calls[0].messages?.[0]?.content || '');
+  assert.match(system, /Bạn là quản trò\. Điều phối cuộc chơi/);
+  assert.doesNotMatch(system, /Vai trò chính: legacy role/);
+  assert.doesNotMatch(system, /Tính cách: legacy persona/);
+  assert.doesNotMatch(system, /Kiểu nói: legacy style/);
+
+  const snapshot = room.snapshot();
+  assert.equal(snapshot.agentProfiles.a.prompt, 'Bạn là quản trò. Điều phối cuộc chơi, giữ nhịp và chỉ nói phần của chính bạn.');
+});
+
 test('profiles clamp unsafe numeric ranges and keep names isolated per room', async () => {
   const providerFactory = () => ({
     async streamChat(options) {
