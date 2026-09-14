@@ -1,6 +1,8 @@
 import { memoryQueryFromMessages } from './agent-memory.js';
 import { ProfiledRoom } from './profiled-room.js';
 
+const ACTIVE_ROOM_STATUSES = new Set(['starting', 'running', 'paused', 'pausing']);
+
 function insertMemoryDataMessage(messages, content) {
   if (!content) return Array.isArray(messages) ? messages : [];
   const next = Array.isArray(messages) ? [...messages] : [];
@@ -69,11 +71,13 @@ export class MemoryProfiledRoom extends ProfiledRoom {
   }
 
   async start(input = {}) {
+    if (ACTIVE_ROOM_STATUSES.has(this.status)) return super.start(input);
     this.resetMemoryRuntime(0);
     return super.start(input);
   }
 
   async continueFromHistory(input = {}) {
+    if (ACTIVE_ROOM_STATUSES.has(this.status)) return super.continueFromHistory(input);
     const cursor = Array.isArray(input?.session?.history) ? input.session.history.length : 0;
     this.resetMemoryRuntime(cursor);
     return super.continueFromHistory(input);
@@ -109,7 +113,11 @@ export class MemoryProfiledRoom extends ProfiledRoom {
 
         try {
           const query = memoryQueryFromMessages(options.messages, this.topic);
-          const { block, memories } = this.memoryManager.buildContextBlock(id, { query, roomId: this.roomId });
+          const { block, memories } = this.memoryManager.buildContextBlock(id, {
+            query,
+            roomId: this.roomId,
+            runId: this.runId,
+          });
           this.lastMemoryRetrieval[id] = { count: memories.length, at: new Date().toISOString() };
           if (memories.length) {
             this.recordDebug('memory:retrieval', {
@@ -254,7 +262,7 @@ export class MemoryProfiledRoom extends ProfiledRoom {
   }
 
   stop() {
-    const wasActive = ['starting', 'running', 'paused', 'pausing'].includes(this.status);
+    const wasActive = ACTIVE_ROOM_STATUSES.has(this.status);
     super.stop();
     if (wasActive) this.flushMemoryConsolidation();
   }
