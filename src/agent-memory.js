@@ -93,17 +93,18 @@ export class AgentMemoryManager {
     return [this.namespace(roomId)];
   }
 
-  retrieve(agentId, { query = '', roomId = 'default-room', limit = this.retrievalLimit } = {}) {
+  retrieve(agentId, { query = '', roomId = 'default-room', runId = '', limit = this.retrievalLimit } = {}) {
     if (!this.enabled) return [];
     return this.store.retrieve(agentId, {
       namespaces: this.namespaces(roomId),
       query,
       limit,
+      excludePrivateRunId: runId,
     });
   }
 
-  buildContextBlock(agentId, { query = '', roomId = 'default-room' } = {}) {
-    const memories = this.retrieve(agentId, { query, roomId });
+  buildContextBlock(agentId, { query = '', roomId = 'default-room', runId = '' } = {}) {
+    const memories = this.retrieve(agentId, { query, roomId, runId });
     if (!memories.length) return { block: '', memories: [] };
     const lines = [];
     let chars = 0;
