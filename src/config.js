@@ -112,7 +112,7 @@ export function getMemoryConfig() {
     scope: scope === 'room' ? 'room' : 'agent',
     retrievalLimit: Math.max(1, Math.min(30, intFromEnv('AGENT_MEMORY_RETRIEVAL_LIMIT', 8))),
     contextMaxChars: Math.max(1200, Math.min(30000, intFromEnv('AGENT_MEMORY_CONTEXT_MAX_CHARS', 6500))),
-    consolidateEveryMessages: Math.max(1, Math.min(100, intFromEnv('AGENT_MEMORY_CONSOLIDATE_EVERY_MESSAGES', 8))),
+    consolidateEveryMessages: Math.max(1, Math.min(100, intFromEnv('AGENT_MEMORY_CONSOLIDATE_EVERY_MESSAGES', 16))),
     maxCandidatesPerPass: Math.max(1, Math.min(20, intFromEnv('AGENT_MEMORY_MAX_CANDIDATES_PER_PASS', 6))),
     minImportance: Math.max(0, Math.min(1, Number(process.env.AGENT_MEMORY_MIN_IMPORTANCE || 0.35))),
     maxItemChars: Math.max(300, Math.min(5000, intFromEnv('AGENT_MEMORY_MAX_ITEM_CHARS', 1800))),
