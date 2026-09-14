@@ -6,3 +6,5 @@ npm-debug.log*
 .DS_Store
 coverage/
 public/generated/
+data/*.sqlite
+data/*.sqlite-*
