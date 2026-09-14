@@ -157,6 +157,6 @@ test('parallel UI exposes free-running status without round concepts', async () 
   assert.doesNotMatch(runtime, /finishParallelBatch/);
   assert.match(index, /src="\/parallel-stream-ui\.js"/);
   assert.match(ui, /parallel:agent-status/);
-  assert.match(ui, /Song song tự do/);
+  assert.match(ui, /agentActivityPanel/);
   assert.doesNotMatch(ui, /Round\s|parallel:batch|parallel-round-badge/);
 });
