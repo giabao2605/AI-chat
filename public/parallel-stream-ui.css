@@ -1,135 +1,133 @@
-.parallel-live-panel {
-  margin-top: 8px;
-  display: grid;
-  gap: 7px;
-  max-width: min(100%, 900px);
+/* Per-agent activity now lives at the bottom of the chat transcript. */
+#liveHint,
+#researchStatus,
+#parallelLivePanel {
+  display: none !important;
 }
 
-.parallel-live-panel.hidden {
+.agent-activity-panel {
+  width: min(100%, 920px);
+  margin: 4px auto 10px;
+  padding: 4px 18px 8px 56px;
+  display: grid;
+  gap: 10px;
+}
+
+.agent-activity-panel.hidden {
   display: none;
 }
 
-.parallel-live-head {
-  display: flex;
+.agent-activity-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
-  min-height: 22px;
-  font-size: 12px;
-  color: rgba(235, 239, 255, .72);
+  gap: 10px;
+  min-height: 38px;
+  color: rgba(235, 239, 255, .76);
 }
 
-.parallel-live-head strong {
-  font-size: 12px;
-  font-weight: 650;
-  letter-spacing: .01em;
-}
-
-.parallel-live-pulse {
-  width: 7px;
-  height: 7px;
+.agent-activity-avatar {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, .09);
   border-radius: 50%;
-  background: currentColor;
-  opacity: .8;
-  box-shadow: 0 0 0 0 rgba(255, 255, 255, .18);
-  animation: parallelPulse 1.6s ease-out infinite;
+  background: rgba(255, 255, 255, .045);
+  color: rgba(246, 248, 255, .9);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .02em;
 }
 
-.parallel-agent-chips {
+.agent-activity-copy {
+  min-width: 0;
   display: flex;
-  align-items: center;
-  gap: 6px;
+  align-items: baseline;
+  gap: 9px;
   flex-wrap: wrap;
 }
 
-.parallel-agent-chip {
+.agent-activity-copy strong {
+  color: rgba(246, 248, 255, .92);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+}
+
+.agent-activity-text {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 26px;
-  padding: 3px 9px;
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: 999px;
-  background: rgba(255,255,255,.035);
-  color: rgba(235,239,255,.62);
-  font-size: 11px;
-  transition: border-color .18s ease, background .18s ease, opacity .18s ease;
+  gap: 8px;
+  min-width: 0;
+  color: rgba(220, 226, 239, .66);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
-.parallel-agent-chip b {
-  color: rgba(245,247,255,.9);
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.parallel-agent-dot {
+.agent-activity-text::before {
+  content: '';
   width: 6px;
   height: 6px;
+  flex: 0 0 6px;
   border-radius: 50%;
   background: currentColor;
-  opacity: .55;
-}
-
-.parallel-agent-chip.status-queued,
-.parallel-agent-chip.status-thinking,
-.parallel-agent-chip.status-researching,
-.parallel-agent-chip.status-streaming {
-  border-color: rgba(255,255,255,.16);
-  background: rgba(255,255,255,.065);
-  color: rgba(245,247,255,.82);
-}
-
-.parallel-agent-chip.status-streaming .parallel-agent-dot,
-.parallel-agent-chip.status-researching .parallel-agent-dot,
-.parallel-agent-chip.status-thinking .parallel-agent-dot {
-  animation: parallelDot 1s ease-in-out infinite alternate;
-}
-
-.parallel-agent-chip.status-done {
   opacity: .72;
 }
 
-.parallel-agent-chip.status-failed {
-  border-color: rgba(255, 120, 120, .28);
-  background: rgba(255, 90, 90, .07);
-  color: rgba(255, 170, 170, .92);
+.agent-activity-row.status-queued .agent-activity-text::before,
+.agent-activity-row.status-thinking .agent-activity-text::before,
+.agent-activity-row.status-researching .agent-activity-text::before,
+.agent-activity-row.status-streaming .agent-activity-text::before,
+.agent-activity-row.status-tooling .agent-activity-text::before {
+  animation: agentActivityPulse 1s ease-in-out infinite alternate;
 }
 
-.parallel-agent-chip.status-cancelled {
-  opacity: .5;
+.agent-activity-row.status-researching .agent-activity-text {
+  color: rgba(199, 218, 255, .82);
 }
 
-.parallel-follow-live {
-  margin-left: auto;
-  border: 0;
-  border-radius: 999px;
-  padding: 3px 8px;
-  background: rgba(255,255,255,.08);
-  color: rgba(245,247,255,.82);
-  font: inherit;
-  cursor: pointer;
+.agent-activity-row.status-streaming .agent-activity-text {
+  color: rgba(218, 231, 255, .78);
 }
 
-.parallel-follow-live.hidden {
-  display: none;
+.agent-activity-row.status-failed .agent-activity-text {
+  color: rgba(255, 171, 171, .9);
 }
 
 .message.parallel-stream-message .message-body {
   position: relative;
 }
 
-@keyframes parallelPulse {
-  0% { box-shadow: 0 0 0 0 rgba(255,255,255,.18); }
-  70% { box-shadow: 0 0 0 6px rgba(255,255,255,0); }
-  100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); }
-}
-
-@keyframes parallelDot {
-  from { opacity: .35; transform: scale(.9); }
+@keyframes agentActivityPulse {
+  from { opacity: .3; transform: scale(.88); }
   to { opacity: 1; transform: scale(1.18); }
 }
 
 @media (max-width: 720px) {
-  .parallel-agent-chip {
-    padding-inline: 7px;
+  .agent-activity-panel {
+    padding: 3px 12px 8px 12px;
+  }
+
+  .agent-activity-row {
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .agent-activity-avatar {
+    width: 24px;
+    height: 24px;
+    font-size: 8px;
+  }
+
+  .agent-activity-copy {
+    gap: 5px 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-activity-text::before {
+    animation: none !important;
   }
 }
