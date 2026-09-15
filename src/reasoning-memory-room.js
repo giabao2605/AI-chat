@@ -77,7 +77,7 @@ export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
   reasoningStatusForConfig(config, mode) {
     if (mode === 'auto') return 'adaptive';
     if (isOfficialGpt56(config)) return 'verified';
-    const cached = this.reasoningProbeCache.get(`${providerCapabilityKey(config)}::${mode}`);
+    const cached = this.reasoningProbeCache?.get(`${providerCapabilityKey(config)}::${mode}`);
     return cached?.status || 'unknown';
   }
 
@@ -99,7 +99,7 @@ export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
     return {
       ...base,
       reasoning: {
-        mode: this.reasoningMode,
+        mode: normalizeReasoningMode(this.reasoningMode, 'auto'),
         levels: this.reasoningCapabilitySummary(),
       },
     };
@@ -120,7 +120,7 @@ export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
     for (const [providerKey, configs] of grouped.entries()) {
       const config = configs[0];
       const cacheKey = `${providerKey}::${mode}`;
-      const cached = this.reasoningProbeCache.get(cacheKey);
+      const cached = this.reasoningProbeCache?.get(cacheKey);
       if (cached) {
         results.push({ ...cached, agentIds: configs.map((item) => item.id) });
         continue;
@@ -128,7 +128,7 @@ export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
 
       if (isOfficialGpt56(config)) {
         const verified = { status: 'verified', mode, model: config.model, checkedAt: new Date().toISOString() };
-        this.reasoningProbeCache.set(cacheKey, verified);
+        this.reasoningProbeCache?.set(cacheKey, verified);
         results.push({ ...verified, agentIds: configs.map((item) => item.id) });
         continue;
       }
@@ -169,7 +169,7 @@ export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
         };
       }
 
-      this.reasoningProbeCache.set(cacheKey, probe);
+      this.reasoningProbeCache?.set(cacheKey, probe);
       results.push({ ...probe, agentIds: configs.map((item) => item.id) });
     }
 
