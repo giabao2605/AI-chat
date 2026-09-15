@@ -1,0 +1,94 @@
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.toolbar-session-status {
+  order: 10;
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid rgba(148, 163, 184, .11);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .025);
+  white-space: nowrap;
+}
+
+.toolbar-history-button {
+  order: 20;
+}
+
+#openLabInspector {
+  order: 30;
+}
+
+#pauseBtn {
+  order: 40;
+}
+
+#stopBtn {
+  order: 50;
+}
+
+.sidebar-tool-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-bottom: 9px;
+}
+
+.sidebar-tool-actions .button {
+  width: 100%;
+  min-width: 0;
+  justify-content: center;
+}
+
+.control-monitor > .token-fold:first-child {
+  margin-top: 0;
+}
+
+@media (max-width: 920px) {
+  .chat-toolbar {
+    align-items: flex-start;
+    gap: 9px;
+  }
+
+  .toolbar-actions {
+    max-width: 62%;
+  }
+}
+
+@media (max-width: 700px) {
+  .chat-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toolbar-actions {
+    max-width: none;
+    justify-content: flex-start;
+  }
+
+  .toolbar-session-status {
+    flex: 1 1 auto;
+  }
+}
+
+@media (max-width: 460px) {
+  .toolbar-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .toolbar-session-status {
+    grid-column: 1 / -1;
+  }
+
+  .toolbar-actions .button {
+    width: 100%;
+  }
+}
