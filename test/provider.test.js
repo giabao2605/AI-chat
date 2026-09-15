@@ -6,6 +6,7 @@ import {
   estimateTokensFromText,
   normalizeMessagesForProvider,
   normalizeUsage,
+  resetProviderCapabilityCacheForTests,
 } from '../src/provider.js';
 
 function listen(handler) {
@@ -50,7 +51,8 @@ test('provider merges all system messages into the first message so gateways can
   assert.equal(messages[1].role, 'user');
 });
 
-test('provider streams deltas and captures exact usage', async (t) => {
+test('provider streams deltas and captures exact usage when the gateway emits it', async (t) => {
+  resetProviderCapabilityCacheForTests();
   const server = await listen(async (req, res) => {
     for await (const _ of req) {}
     res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -74,18 +76,17 @@ test('provider streams deltas and captures exact usage', async (t) => {
   assert.equal(streamed, 'Xin chào');
   assert.equal(result.text, 'Xin chào');
   assert.deepEqual(result.usage, { inputTokens: 12, outputTokens: 3, totalTokens: 15, exact: true });
+  assert.equal(result.diagnostics.requestCount, 1);
 });
 
-test('provider retries gateways that reject stream_options and estimates missing usage', async (t) => {
+test('generic gateways do not pay a failed stream_options probe before the real request', async (t) => {
+  resetProviderCapabilityCacheForTests();
   let requests = 0;
   const server = await listen(async (req, res) => {
     let body = '';
     for await (const chunk of req) body += chunk;
     requests += 1;
-    if (JSON.parse(body).stream_options) {
-      res.writeHead(400, { 'content-type': 'application/json' });
-      return res.end('{"error":"unsupported"}');
-    }
+    assert.equal(JSON.parse(body).stream_options, undefined);
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     return res.end('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
   });
@@ -97,7 +98,7 @@ test('provider retries gateways that reject stream_options and estimates missing
     model: 'mock',
   });
   const result = await provider.streamChat({ messages: [{ role: 'user', content: 'hello' }] });
-  assert.equal(requests, 2);
+  assert.equal(requests, 1);
   assert.equal(result.text, 'ok');
   assert.equal(result.usage.exact, false);
   assert.ok(result.usage.totalTokens > 0);

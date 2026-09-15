@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OpenAICompatibleProvider } from '../src/provider.js';
+import {
+  OpenAICompatibleProvider,
+  resetProviderCapabilityCacheForTests,
+  selectAdaptiveReasoningEffort,
+} from '../src/provider.js';
 import { ProfiledRoom } from '../src/profiled-room.js';
 
 function sseResponse(events = []) {
@@ -12,22 +16,8 @@ function deltaText(text) {
   return { choices: [{ delta: { content: text } }] };
 }
 
-function toolCall(name, args) {
-  return {
-    choices: [{
-      delta: {
-        tool_calls: [{
-          index: 0,
-          id: 'call_reason',
-          type: 'function',
-          function: { name, arguments: JSON.stringify(args) },
-        }],
-      },
-    }],
-  };
-}
-
-test('GPT-5.6 fast path uses low reasoning and stays one provider request for a simple turn', async () => {
+test('GPT-5.6 fast path stays one provider request and uses low reasoning for a light turn', async () => {
+  resetProviderCapabilityCacheForTests();
   const originalFetch = globalThis.fetch;
   const bodies = [];
   globalThis.fetch = async (_url, init) => {
@@ -54,54 +44,44 @@ test('GPT-5.6 fast path uses low reasoning and stays one provider request for a 
     assert.equal(streamed, 'Chào buổi sáng!');
     assert.equal(bodies.length, 1);
     assert.equal(bodies[0].reasoning_effort, 'low');
-    assert.equal(bodies[0].prompt_cache_key, 'ai-chat:a:gpt-5.6-luna');
-    assert.ok(bodies[0].tools.some((tool) => tool.function?.name === 'request_deeper_reasoning'));
-    assert.equal(result.diagnostics.adaptiveEscalated, false);
+    assert.equal(bodies[0].prompt_cache_key, undefined, 'generic gateways should not receive speculative cache parameters');
+    assert.ok(!Array.isArray(bodies[0].tools) || !bodies[0].tools.some((tool) => tool.function?.name === 'request_deeper_reasoning'));
+    assert.equal(result.diagnostics.requestCount, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test('GPT-5.6 can self-escalate to deeper reasoning without leaking the internal tool upward', async () => {
+test('adaptive reasoning raises budget before the request instead of self-escalating through another model call', async () => {
+  resetProviderCapabilityCacheForTests();
   const originalFetch = globalThis.fetch;
   const bodies = [];
-  let call = 0;
   globalThis.fetch = async (_url, init) => {
     bodies.push(JSON.parse(init.body));
-    call += 1;
-    if (call === 1) {
-      return sseResponse([toolCall('request_deeper_reasoning', {
-        effort: 'high',
-        reason: 'Cần kiểm tra nhiều ràng buộc phụ thuộc nhau.',
-      })]);
-    }
-    return sseResponse([deltaText('Kết quả sau khi suy luận sâu.')]);
+    return sseResponse([deltaText('Kết quả.')]);
   };
 
   try {
+    const structured = `${'Phân tích các ràng buộc sau.\n'.repeat(35)}${'{a: 1, b: 2} -> (a + b)'.repeat(30)}`;
+    assert.ok(['medium', 'high'].includes(selectAdaptiveReasoningEffort([
+      { role: 'user', content: structured },
+    ], { requested: 'low' })));
+
     const provider = new OpenAICompatibleProvider({
       baseUrl: 'https://example.test/v1',
       apiKey: 'test',
       model: 'gpt-5.6-luna',
     });
-    let streamed = '';
     const result = await provider.streamChat({
-      messages: [{ role: 'user', content: 'Giải bài toán này thật chắc chắn.' }],
+      messages: [{ role: 'user', content: structured }],
       adaptiveReasoning: true,
       reasoningEffort: 'low',
-      onDelta: (delta) => { streamed += delta; },
     });
 
-    assert.equal(bodies.length, 2);
-    assert.equal(bodies[0].reasoning_effort, 'low');
-    assert.equal(bodies[1].reasoning_effort, 'high');
-    assert.ok(bodies[0].tools.some((tool) => tool.function?.name === 'request_deeper_reasoning'));
-    assert.ok(!Array.isArray(bodies[1].tools) || !bodies[1].tools.some((tool) => tool.function?.name === 'request_deeper_reasoning'));
-    assert.equal(result.toolCalls.length, 0);
-    assert.equal(result.text, 'Kết quả sau khi suy luận sâu.');
-    assert.equal(streamed, 'Kết quả sau khi suy luận sâu.');
+    assert.equal(bodies.length, 1, 'adaptive budget selection must not add a hidden classifier/escalation request');
+    assert.ok(['medium', 'high'].includes(bodies[0].reasoning_effort));
+    assert.equal(result.diagnostics.requestCount, 1);
     assert.equal(result.diagnostics.adaptiveEscalated, true);
-    assert.equal(result.diagnostics.adaptiveToEffort, 'high');
   } finally {
     globalThis.fetch = originalFetch;
   }

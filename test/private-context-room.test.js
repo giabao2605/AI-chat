@@ -30,14 +30,22 @@ function waitForCompleted(room) {
   });
 }
 
-test('private context tool parser validates recipient isolation', () => {
+test('private context tool parser validates recipient isolation and optional public reply', () => {
   const valid = parsePrivateContextToolCall({
     function: {
       name: PRIVATE_CONTEXT_TOOL_NAME,
       arguments: JSON.stringify({ recipient: 'b', content: 'RED-731' }),
     },
   }, { allowedRecipients: ['a', 'b', 'c'], senderId: 'a' });
-  assert.deepEqual(valid, { recipient: 'b', content: 'RED-731', error: '' });
+  assert.deepEqual(valid, { recipient: 'b', content: 'RED-731', publicReply: '', error: '' });
+
+  const withReply = parsePrivateContextToolCall({
+    function: {
+      name: PRIVATE_CONTEXT_TOOL_NAME,
+      arguments: JSON.stringify({ recipient: 'b', content: 'RED-731', public_reply: 'Xin chào.' }),
+    },
+  }, { allowedRecipients: ['a', 'b', 'c'], senderId: 'a' });
+  assert.equal(withReply.publicReply, 'Xin chào.');
 
   const self = parsePrivateContextToolCall({
     function: {
@@ -158,7 +166,7 @@ test('one agent can fan out private context to multiple recipients in the same p
     messages: [{ role: 'user', content: 'send privately' }],
   });
 
-  assert.equal(providerCalls, 2, 'both deliveries happen before the model resumes its public reply');
+  assert.equal(providerCalls, 2, 'legacy tool calls without public_reply still resume safely');
   assert.equal(result.text, 'public after fan-out');
   assert.equal(room.privateContexts.length, 2);
   assert.deepEqual(
@@ -179,6 +187,46 @@ test('one agent can fan out private context to multiple recipients in the same p
   assert.equal(room.privateInboxVersion.b, 1);
   assert.equal(room.privateInboxVersion.c, 1);
   assert.equal(result.diagnostics.privateContextCalls, 2);
+});
+
+test('private fan-out can deliver secrets and a public reply in one provider pass', async () => {
+  const room = new ProfiledRoom({
+    agents,
+    providerFactory: () => ({ streamChat: async () => ({ text: 'unused', usage: usage(), toolCalls: [] }) }),
+  });
+  let providerCalls = 0;
+  const result = await room.streamChatWithPrivateContext('a', async () => {
+    providerCalls += 1;
+    return {
+      text: '',
+      usage: usage(),
+      toolCalls: [
+        {
+          id: 'onepass_b',
+          type: 'function',
+          function: {
+            name: PRIVATE_CONTEXT_TOOL_NAME,
+            arguments: JSON.stringify({ recipient: 'b', content: 'SECRET-B', public_reply: 'Xin chào mọi người.' }),
+          },
+        },
+        {
+          id: 'onepass_c',
+          type: 'function',
+          function: {
+            name: PRIVATE_CONTEXT_TOOL_NAME,
+            arguments: JSON.stringify({ recipient: 'c', content: 'SECRET-C' }),
+          },
+        },
+      ],
+    };
+  }, { messages: [{ role: 'user', content: 'coordinate then reply' }] });
+
+  assert.equal(providerCalls, 1, 'public_reply should remove the follow-up model round-trip');
+  assert.equal(result.text, 'Xin chào mọi người.');
+  assert.equal(result.diagnostics.privateContextOnePass, true);
+  assert.equal(room.privateContexts.length, 2);
+  assert.match(room.privateContextSystemBlock('b'), /SECRET-B/);
+  assert.match(room.privateContextSystemBlock('c'), /SECRET-C/);
 });
 
 test('multiple senders can privately converge on one recipient without leaking across senders', () => {

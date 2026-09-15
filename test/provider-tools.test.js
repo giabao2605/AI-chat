@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { IMAGE_GENERATION_TOOL, PRIVATE_CONTEXT_TOOL, PRIVATE_CONTEXT_TOOL_NAME } from '../src/agent-tools.js';
-import { OpenAICompatibleProvider } from '../src/provider.js';
+import { OpenAICompatibleProvider, resetProviderCapabilityCacheForTests } from '../src/provider.js';
 
 function sseToolCall() {
   const chunks = [
@@ -61,6 +61,7 @@ function sseText(text = 'ok') {
 }
 
 test('provider sends tool definitions and reconstructs streamed tool-call arguments', async () => {
+  resetProviderCapabilityCacheForTests();
   const originalFetch = globalThis.fetch;
   let requestBody;
   globalThis.fetch = async (_url, options) => {
@@ -87,6 +88,7 @@ test('provider sends tool definitions and reconstructs streamed tool-call argume
 });
 
 test('provider reconstructs multiple parallel private-context tool calls by stream index', async () => {
+  resetProviderCapabilityCacheForTests();
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => sseMultiplePrivateToolCalls();
 
@@ -111,7 +113,8 @@ test('provider reconstructs multiple parallel private-context tool calls by stre
   }
 });
 
-test('provider falls back without tools when native tool calling is rejected and caches capability', async () => {
+test('provider falls back only once when native tool calling is explicitly rejected and caches capability', async () => {
+  resetProviderCapabilityCacheForTests();
   const originalFetch = globalThis.fetch;
   const bodies = [];
   globalThis.fetch = async (_url, options) => {
@@ -129,18 +132,18 @@ test('provider falls back without tools when native tool calling is rejected and
     });
     assert.equal(first.toolFallback, true);
     assert.equal(first.text, 'fallback text');
-    assert.equal(bodies.length, 3, 'tries with usage, without usage, then without tools');
+    assert.equal(bodies.length, 2, 'targeted fallback must not probe unrelated capabilities');
     assert.ok(bodies[0].tools);
-    assert.ok(bodies[1].tools);
-    assert.equal(bodies[2].tools, undefined);
+    assert.equal(bodies[1].tools, undefined);
+    assert.equal(first.diagnostics.attempts[0].retryReason, 'tools');
 
     const second = await provider.streamChat({
       messages: [{ role: 'user', content: 'hello again' }],
       tools: [IMAGE_GENERATION_TOOL],
     });
     assert.equal(second.toolFallback, true);
-    assert.equal(bodies.length, 4, 'cached unsupported tools avoids repeating failed requests');
-    assert.equal(bodies[3].tools, undefined);
+    assert.equal(bodies.length, 3, 'cached unsupported tools avoids repeating failed requests');
+    assert.equal(bodies[2].tools, undefined);
   } finally {
     globalThis.fetch = originalFetch;
   }
