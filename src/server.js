@@ -19,6 +19,11 @@ import { AgentMemoryManager } from './agent-memory.js';
 import { CloudflareImageTool } from './cloudflare-image-tool.js';
 import { createImageContextResolver } from './image-context.js';
 import { OpenAICompatibleImageTool } from './image-tool.js';
+import {
+  clearAgentMemory,
+  forgetMemoryRecord,
+  inspectAgentMemory,
+} from './memory-inspector-service.js';
 import { MemoryProfiledRoom } from './memory-profiled-room.js';
 import { SqliteMemoryStore } from './memory-store.js';
 import { RoomManager } from './room-manager.js';
@@ -130,6 +135,15 @@ function requestRoomId(req, url) {
   });
 }
 
+function configuredAgentId(value) {
+  const id = String(value || '').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(configuredAgents, id) ? id : '';
+}
+
+function refreshRoomMemoryStats(agentId = '') {
+  for (const record of manager.rooms.values()) record.room?.refreshMemoryStats?.(agentId);
+}
+
 function cleanImagePrompt(value) {
   return String(value || '').trim().slice(0, 12000);
 }
@@ -187,6 +201,33 @@ async function handleApi(req, res, url) {
   }
   if (req.method === 'GET' && pathname === '/api/config') return json(res, 200, getPublicConfig());
   if (req.method === 'GET' && pathname === '/api/state') return json(res, 200, manager.get(roomId).room.snapshot());
+  if (req.method === 'GET' && pathname === '/api/memory') {
+    if (!memoryManager) return json(res, 503, { error: 'Agent memory đang tắt.' });
+    const requestedAgent = String(url.searchParams.get('agent') || '').trim().toLowerCase();
+    const agentIds = requestedAgent ? [configuredAgentId(requestedAgent)] : Object.keys(configuredAgents);
+    if (!agentIds.length || agentIds.some((id) => !id)) return json(res, 400, { error: 'Agent không hợp lệ.' });
+    const query = String(url.searchParams.get('query') || '').slice(0, 12000);
+    const type = String(url.searchParams.get('type') || '').slice(0, 40).toLowerCase();
+    const includeInactive = url.searchParams.get('includeInactive') === 'true';
+    const limit = Math.max(1, Math.min(500, Number(url.searchParams.get('limit')) || 250));
+    const agents = Object.fromEntries(agentIds.map((id) => {
+      const inspection = inspectAgentMemory(memoryManager, id, { roomId, query, type, includeInactive, limit });
+      return [id, {
+        name: configuredAgents[id]?.name || id,
+        model: configuredAgents[id]?.model || '',
+        ...inspection,
+      }];
+    }));
+    return json(res, 200, {
+      enabled: true,
+      scope: memoryManager.scope,
+      roomId,
+      query,
+      includeInactive,
+      type,
+      agents,
+    });
+  }
   if (req.method === 'POST' && pathname === '/api/rooms') {
     if (!serverConfig.multiRoomEnabled) {
       manager.get('default-room');
@@ -218,8 +259,29 @@ async function handleApi(req, res, url) {
 
   if (pathname === '/api/memory/forget-runs') {
     const forgotten = memoryManager?.forgetRuns(body.runIds) || 0;
-    for (const record of manager.rooms.values()) record.room?.refreshMemoryStats?.();
+    refreshRoomMemoryStats();
     return json(res, 200, { ok: true, forgotten });
+  }
+
+  if (pathname === '/api/memory/forget') {
+    if (!memoryManager) return json(res, 503, { error: 'Agent memory đang tắt.' });
+    const agentId = configuredAgentId(body.agentId);
+    if (!agentId || !body.memoryId) return json(res, 400, { error: 'Thiếu agentId hoặc memoryId hợp lệ.' });
+    const forgotten = forgetMemoryRecord(memoryManager, agentId, body.memoryId, { roomId });
+    refreshRoomMemoryStats(agentId);
+    return json(res, 200, { ok: true, forgotten });
+  }
+
+  if (pathname === '/api/memory/clear') {
+    if (!memoryManager) return json(res, 503, { error: 'Agent memory đang tắt.' });
+    const agentId = configuredAgentId(body.agentId);
+    if (!agentId) return json(res, 400, { error: 'agentId không hợp lệ.' });
+    const cleared = clearAgentMemory(memoryManager, agentId, {
+      roomId,
+      type: String(body.type || '').slice(0, 40).toLowerCase(),
+    });
+    refreshRoomMemoryStats(agentId);
+    return json(res, 200, { ok: true, cleared });
   }
 
   const room = manager.get(roomId).room;
