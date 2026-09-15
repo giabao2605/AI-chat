@@ -24,13 +24,13 @@ export const PRIVATE_CONTEXT_TOOL = {
   type: 'function',
   function: {
     name: PRIVATE_CONTEXT_TOOL_NAME,
-    description: 'Gửi một mẩu context bí mật cho đúng một AI khác trong cùng phòng. Nội dung không được đưa vào transcript chung và chỉ sender + recipient được nhận lại trong context riêng. Chỉ dùng khi thật sự cần thông tin bất đối xứng giữa các AI.',
+    description: 'Gửi một mẩu context bí mật cho một AI khác trong cùng phòng. Nội dung không được đưa vào transcript chung và chỉ sender + recipient của từng lần gửi được nhận lại trong context riêng. Bạn CÓ THỂ gọi tool nhiều lần trong cùng một lượt, kể cả trả nhiều tool calls trong cùng một response, để gửi riêng cho nhiều AI khác nhau (1→nhiều). Nhiều AI cũng có thể độc lập gửi riêng tới cùng một recipient (nhiều→1). Mỗi call vẫn có đúng một recipient để bảo toàn isolation giữa các recipient.',
     parameters: {
       type: 'object',
       properties: {
         recipient: {
           type: 'string',
-          description: 'ID agent nhận context, ví dụ a, b, c hoặc d. Phải là một agent khác đang có mặt trong phòng.',
+          description: 'ID của đúng một agent nhận context ở call này, ví dụ a, b, c hoặc d. Muốn gửi tới nhiều agent, tạo nhiều send_private_context calls trong cùng lượt, mỗi call chọn một recipient khác.',
         },
         content: {
           type: 'string',
