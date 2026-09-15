@@ -304,6 +304,7 @@ els.clear?.addEventListener('click', async () => {
     });
     setStatus(`Đã xóa ${result.cleared || 0} memory của ${name}.`, 'success');
     await loadAgentOverview();
+    setLoading(false);
     await loadMemory({ quiet: true });
   } catch (error) {
     setStatus(error?.message || String(error), 'error');
