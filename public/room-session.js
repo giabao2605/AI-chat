@@ -2,6 +2,7 @@ import { readAgentProfiles } from './agent-profiles.js';
 import './memory-inspector.js';
 import './private-context-inspector.js';
 import './header-toolbar-layout.js';
+import './reasoning-control.js';
 
 const ROOM_KEY = 'ai-chat-room-id-v2';
 const EXTRA_PERSONAS_KEY = 'ai-chat-extra-personas-v1';

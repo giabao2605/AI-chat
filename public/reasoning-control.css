@@ -1,0 +1,117 @@
+.reasoning-control {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.reasoning-trigger {
+  min-width: 72px;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid rgba(148, 163, 184, .14);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, .42);
+  color: #7aa2ff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .01em;
+  cursor: pointer;
+  transition: border-color .16s ease, background .16s ease, transform .16s ease;
+}
+
+.reasoning-trigger:hover {
+  border-color: rgba(122, 162, 255, .4);
+  background: rgba(30, 41, 59, .64);
+}
+
+.reasoning-trigger:active {
+  transform: translateY(1px);
+}
+
+.reasoning-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  width: min(300px, calc(100vw - 28px));
+  padding: 15px 16px 13px;
+  border: 1px solid rgba(148, 163, 184, .14);
+  border-radius: 16px;
+  background: rgba(17, 19, 24, .98);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, .34);
+  z-index: 80;
+}
+
+.reasoning-popover.hidden {
+  display: none;
+}
+
+.reasoning-current-label {
+  margin-bottom: 12px;
+  color: #6f9dff;
+  font-size: 13px;
+  font-weight: 750;
+  text-align: center;
+}
+
+.reasoning-range {
+  display: block;
+  width: 100%;
+  margin: 0;
+  accent-color: #6f9dff;
+  cursor: pointer;
+}
+
+.reasoning-range:disabled {
+  cursor: wait;
+  opacity: .6;
+}
+
+.reasoning-ticks {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  align-items: center;
+  margin: 4px 4px 0;
+  pointer-events: none;
+}
+
+.reasoning-ticks span {
+  justify-self: center;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, .46);
+}
+
+.reasoning-capability {
+  min-height: 16px;
+  margin-top: 10px;
+  color: rgba(203, 213, 225, .68);
+  font-size: 10px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.reasoning-capability[data-tone='good'] {
+  color: #72d6a3;
+}
+
+.reasoning-capability[data-tone='bad'] {
+  color: #f19aaa;
+}
+
+.reasoning-control.is-applying .reasoning-trigger {
+  opacity: .72;
+}
+
+@media (max-width: 620px) {
+  .reasoning-trigger {
+    min-width: 62px;
+    height: 38px;
+    padding-inline: 9px;
+  }
+
+  .reasoning-popover {
+    right: -4px;
+    width: min(286px, calc(100vw - 22px));
+  }
+}
