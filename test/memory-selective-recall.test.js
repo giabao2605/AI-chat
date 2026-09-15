@@ -26,20 +26,12 @@ test('generic greeting does not activate an old high-importance game episode', (
   const memory = manager(store);
   try {
     store.upsert({
-      agentId: 'a',
-      namespace: 'agent',
-      type: 'episodic',
+      agentId: 'a', namespace: 'agent', type: 'episodic',
       content: 'Trong game Ma Sói, Luna 1 đang là Sói và cần tiếp tục vòng đêm theo luật cũ.',
-      importance: 1,
-      confidence: 1,
-      runId: 'run-game-old',
+      importance: 1, confidence: 1, runId: 'run-game-old',
     });
 
-    const recalled = memory.retrieve('a', {
-      query: 'hello buổi sáng 4 đứa',
-      runId: 'run-new',
-    });
-
+    const recalled = memory.retrieve('a', { query: 'hello buổi sáng 4 đứa', runId: 'run-new' });
     assert.deepEqual(recalled, []);
   } finally {
     store.close();
@@ -51,20 +43,12 @@ test('explicitly referring to the old game still recalls the related episode', (
   const memory = manager(store);
   try {
     store.upsert({
-      agentId: 'a',
-      namespace: 'agent',
-      type: 'episodic',
+      agentId: 'a', namespace: 'agent', type: 'episodic',
       content: 'Trong game Ma Sói hôm trước, Luna 1 đã chọn bảo vệ dân làng ở vòng cuối.',
-      importance: 0.9,
-      confidence: 0.95,
-      runId: 'run-game-old',
+      importance: 0.9, confidence: 0.95, runId: 'run-game-old',
     });
 
-    const recalled = memory.retrieve('a', {
-      query: 'mày nhớ game Ma Sói hôm trước không?',
-      runId: 'run-new',
-    });
-
+    const recalled = memory.retrieve('a', { query: 'mày nhớ game Ma Sói hôm trước không?', runId: 'run-new' });
     assert.equal(recalled.length, 1);
     assert.match(recalled[0].content, /Ma Sói/i);
   } finally {
@@ -77,21 +61,12 @@ test('stable semantic preference remains available when the current intent is re
   const memory = manager(store);
   try {
     store.upsert({
-      agentId: 'a',
-      namespace: 'agent',
-      type: 'semantic',
-      key: 'observer.code_style',
+      agentId: 'a', namespace: 'agent', type: 'semantic', key: 'observer.code_style',
       content: 'Người dùng thích câu trả lời code ngắn gọn và trực tiếp.',
-      importance: 0.9,
-      confidence: 0.95,
-      runId: 'run-pref',
+      importance: 0.9, confidence: 0.95, runId: 'run-pref',
     });
 
-    const recalled = memory.retrieve('a', {
-      query: 'viết code ngắn gọn cho tao',
-      runId: 'run-new',
-    });
-
+    const recalled = memory.retrieve('a', { query: 'viết code ngắn gọn cho tao', runId: 'run-new' });
     assert.equal(recalled.length, 1);
     assert.match(recalled[0].content, /ngắn gọn/i);
   } finally {
@@ -117,27 +92,18 @@ test('consolidation rejects session-scoped game state but keeps long-term user p
   const provider = {
     async streamChat() {
       return {
-        text: JSON.stringify({
-          memories: [
-            {
-              type: 'episodic',
-              retention: 'session',
-              content: 'Trong game hiện tại, Luna 1 là Sói và phải tiếp tục vòng đêm.',
-              importance: 1,
-              confidence: 1,
-              sourceEventIds: ['m1'],
-            },
-            {
-              type: 'semantic',
-              retention: 'long_term',
-              key: 'observer.response_style',
-              content: 'Người dùng thích câu trả lời súc tích.',
-              importance: 0.9,
-              confidence: 0.95,
-              sourceEventIds: ['m2'],
-            },
-          ],
-        }),
+        text: JSON.stringify({ memories: [
+          {
+            type: 'episodic', retention: 'session',
+            content: 'Trong game hiện tại, Luna 1 là Sói và phải tiếp tục vòng đêm.',
+            importance: 1, confidence: 1, sourceEventIds: ['m1'],
+          },
+          {
+            type: 'semantic', retention: 'long_term', key: 'observer.response_style',
+            content: 'Người dùng thích câu trả lời súc tích.',
+            importance: 0.9, confidence: 0.95, sourceEventIds: ['m2'],
+          },
+        ] }),
         usage: usage(),
       };
     },
@@ -145,11 +111,7 @@ test('consolidation rejects session-scoped game state but keeps long-term user p
 
   try {
     const result = await memory.consolidate({
-      agentId: 'a',
-      agentName: 'Luna 1',
-      provider,
-      runId: 'run-game',
-      topic: 'Chơi Ma Sói',
+      agentId: 'a', agentName: 'Luna 1', provider, runId: 'run-game', topic: 'Chơi Ma Sói',
       events: [
         { id: 'm1', speaker: 'user', name: 'Bạn', text: 'Ván này Luna 1 là Sói, tiếp tục theo luật game.' },
         { id: 'm2', speaker: 'user', name: 'Bạn', text: 'Ngoài game thì tao thích câu trả lời súc tích.' },
@@ -179,10 +141,53 @@ test('forgetRuns deactivates memories belonging to deleted history and leaves ot
     });
 
     assert.equal(memory.forgetRuns(['run-delete']), 1);
+    assert.equal(memory.isRunForgotten('run-delete'), true);
 
     const all = memory.list('a', { includeInactive: true });
     assert.equal(all.find((item) => item.id === forgotten.id)?.active, false);
     assert.equal(all.find((item) => item.id === kept.id)?.active, true);
+  } finally {
+    store.close();
+  }
+});
+
+test('forgotten run cannot resurrect from a consolidation already in flight', async () => {
+  const store = new SqliteMemoryStore({ path: ':memory:' });
+  const memory = manager(store);
+  let release;
+  let started;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  const providerStarted = new Promise((resolve) => { started = resolve; });
+  const provider = {
+    async streamChat() {
+      started();
+      await blocked;
+      return {
+        text: JSON.stringify({ memories: [{
+          type: 'semantic', retention: 'long_term', key: 'old.game.state',
+          content: 'Game Ma Sói cũ phải tiếp tục ở vòng đêm.',
+          importance: 1, confidence: 1, sourceEventIds: ['m1'],
+        }] }),
+        usage: usage(),
+      };
+    },
+  };
+
+  try {
+    const task = memory.consolidate({
+      agentId: 'a', agentName: 'Luna 1', provider, runId: 'run-delete-race', topic: 'Ma Sói',
+      events: [{ id: 'm1', speaker: 'user', name: 'Bạn', text: 'Tiếp tục game Ma Sói.' }],
+    });
+
+    await providerStarted;
+    memory.forgetRuns(['run-delete-race']);
+    release();
+    const result = await task;
+
+    assert.equal(result.skipped, true);
+    assert.equal(result.stored.length, 0);
+    assert.equal(memory.isRunForgotten('run-delete-race'), true);
+    assert.equal(memory.list('a').length, 0);
   } finally {
     store.close();
   }
@@ -201,10 +206,7 @@ test('history deletion syncs run tombstones to the backend memory endpoint in br
   try {
     const deleted = addDeletedHistoryRunIds([], ['run-old']);
     assert.deepEqual(deleted, ['run-old']);
-    filterDeletedHistory([
-      { runId: 'run-old' },
-      { runId: 'run-keep' },
-    ], deleted);
+    filterDeletedHistory([{ runId: 'run-old' }, { runId: 'run-keep' }], deleted);
 
     await Promise.resolve();
     assert.equal(calls.length >= 2, true, 'new deletion and startup reconciliation should both sync');
