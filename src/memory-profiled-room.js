@@ -1,4 +1,4 @@
-import { memoryQueryFromMessages } from './agent-memory.js';
+import { memoryQueryFromHistory } from './agent-memory.js';
 import { ProfiledRoom } from './profiled-room.js';
 
 const ACTIVE_ROOM_STATUSES = new Set(['starting', 'running', 'paused', 'pausing']);
@@ -130,7 +130,7 @@ export class MemoryProfiledRoom extends ProfiledRoom {
         if (!agentTurn || !this.memoryEnabled()) return profiledStream(options);
 
         try {
-          const query = memoryQueryFromMessages(options.messages, this.topic);
+          const query = memoryQueryFromHistory(this.history, this.topic);
           const { block, memories } = this.memoryManager.buildContextBlock(id, {
             query,
             roomId: this.roomId,
