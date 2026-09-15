@@ -1,3 +1,11 @@
+.control-monitor-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .memory-backdrop {
   position: fixed;
   inset: 0;
@@ -289,6 +297,7 @@
 .memory-inspector-status.error { color: #f0a6ae; }
 
 @media (max-width: 640px) {
+  .control-monitor-actions { width: 100%; justify-content: flex-start; }
   .memory-query-row { grid-template-columns: 1fr; }
   .memory-actions-row { align-items: stretch; flex-direction: column; }
   .memory-action-group { width: 100%; }
