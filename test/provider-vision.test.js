@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OpenAICompatibleProvider, hasImageInput, normalizeMessagesForProvider, toTextOnlyMessages } from '../src/provider.js';
+import {
+  OpenAICompatibleProvider,
+  hasImageInput,
+  normalizeMessagesForProvider,
+  resetProviderCapabilityCacheForTests,
+  toTextOnlyMessages,
+} from '../src/provider.js';
 
 const DATA_URL = 'data:image/png;base64,iVBORw0KGgo=';
 
@@ -34,13 +40,14 @@ test('provider normalization preserves OpenAI-compatible image_url parts', () =>
   assert.match(textOnly[1].content, /Ảnh đính kèm/);
 });
 
-test('provider falls back to text once when image input is rejected and caches capability', async () => {
+test('provider falls back to text once when image input is explicitly rejected and caches capability', async () => {
+  resetProviderCapabilityCacheForTests();
   const originalFetch = globalThis.fetch;
   const bodies = [];
   globalThis.fetch = async (_url, options) => {
     const body = JSON.parse(options.body);
     bodies.push(body);
-    if (hasImageInput(body.messages)) return new Response('unsupported vision', { status: 400 });
+    if (hasImageInput(body.messages)) return new Response('unsupported vision input', { status: 400 });
     return sse('fallback ok');
   };
 
@@ -49,15 +56,15 @@ test('provider falls back to text once when image input is rejected and caches c
     const first = await provider.streamChat({ messages: visionMessages() });
     assert.equal(first.visionFallback, true);
     assert.equal(first.text, 'fallback ok');
-    assert.equal(bodies.length, 3, 'first turn tries with usage, without usage, then text fallback');
+    assert.equal(bodies.length, 2, 'targeted fallback must not probe unrelated capabilities');
     assert.equal(hasImageInput(bodies[0].messages), true);
-    assert.equal(hasImageInput(bodies[1].messages), true);
-    assert.equal(hasImageInput(bodies[2].messages), false);
+    assert.equal(hasImageInput(bodies[1].messages), false);
+    assert.equal(first.diagnostics.attempts[0].retryReason, 'vision');
 
     const second = await provider.streamChat({ messages: visionMessages() });
     assert.equal(second.visionFallback, true);
-    assert.equal(bodies.length, 4, 'cached unsupported vision skips repeated failed image attempts');
-    assert.equal(hasImageInput(bodies[3].messages), false);
+    assert.equal(bodies.length, 3, 'cached unsupported vision skips repeated failed image attempts');
+    assert.equal(hasImageInput(bodies[2].messages), false);
   } finally {
     globalThis.fetch = originalFetch;
   }
