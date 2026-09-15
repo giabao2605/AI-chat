@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="/empty-state-v2.css" />
   <link rel="stylesheet" href="/modern-theme.css" />
   <link rel="stylesheet" href="/light-blue-theme.css" />
+  <link rel="stylesheet" href="/memory-inspector.css" />
 </head>
 <body>
   <div class="app-shell">
@@ -72,7 +73,10 @@
           <section class="control-monitor" aria-label="Trạng thái phòng và thống kê token">
             <div class="status-line control-status-line">
               <div class="status-wrap"><span id="connectionDot" class="dot offline"></span><span id="connectionText">Đang kết nối</span><span id="roomStatus" class="status-pill">idle</span></div>
-              <button id="historyBtn" class="button ghost compact-button" type="button">Lịch sử <span id="historyCount" class="history-count">0</span></button>
+              <div class="control-monitor-actions">
+                <button id="memoryInspectorBtn" class="button ghost compact-button" type="button">Memory <span id="memoryCount" class="history-count">0</span></button>
+                <button id="historyBtn" class="button ghost compact-button" type="button">Lịch sử <span id="historyCount" class="history-count">0</span></button>
+              </div>
             </div>
 
             <details id="tokenPanel" class="sidebar-fold token-fold">
@@ -154,6 +158,43 @@
     <div id="historyList" class="history-list"></div>
   </aside>
 
+  <div id="memoryBackdrop" class="memory-backdrop hidden"></div>
+  <aside id="memoryDrawer" class="memory-drawer" aria-hidden="true">
+    <div class="memory-header">
+      <div>
+        <div class="eyebrow">AGENT MEMORY</div>
+        <h2>Memory Inspector</h2>
+        <p>Xem memory dài hạn thật trong SQLite. Ô query bên dưới chỉ preview memory nào sẽ được kích hoạt; nó không tăng accessCount hay thay đổi ranking.</p>
+      </div>
+      <button id="closeMemoryBtn" class="icon-button" type="button" title="Đóng">×</button>
+    </div>
+    <div class="memory-toolbar">
+      <div id="memoryAgentTabs" class="memory-agent-tabs" aria-label="Chọn agent"></div>
+      <div class="memory-query-row">
+        <input id="memoryQuery" type="search" maxlength="12000" placeholder="Thử intent truy hồi, ví dụ: mày nhớ game Ma Sói lần trước không?" />
+        <select id="memoryTypeFilter" aria-label="Lọc loại memory">
+          <option value="">Tất cả loại</option>
+          <option value="semantic">Semantic</option>
+          <option value="episodic">Episode</option>
+          <option value="belief">Belief</option>
+          <option value="relationship">Relationship</option>
+          <option value="private">Private</option>
+          <option value="procedural">Procedural</option>
+        </select>
+        <label class="memory-inline-toggle"><input id="memoryIncludeInactive" type="checkbox" /> Hiện memory đã quên</label>
+      </div>
+      <div class="memory-actions-row">
+        <div id="memorySummary" class="memory-summary">Chưa tải memory.</div>
+        <div class="memory-action-group">
+          <button id="refreshMemoryBtn" class="button ghost compact-button" type="button">Làm mới</button>
+          <button id="clearAgentMemoryBtn" class="button danger compact-button" type="button">Xóa toàn bộ memory</button>
+        </div>
+      </div>
+    </div>
+    <div id="memoryInspectorStatus" class="memory-inspector-status" role="status"></div>
+    <div id="memoryList" class="memory-list"></div>
+  </aside>
+
   <div id="toast" class="toast" role="status"></div>
   <script type="module" src="/room-session.js"></script>
   <script type="module" src="/prompt-ui.js"></script>
@@ -164,6 +205,7 @@
   <script type="module" src="/control-ui.js"></script>
   <script type="module" src="/research-status.js"></script>
   <script type="module" src="/parallel-stream-ui.js"></script>
+  <script type="module" src="/memory-inspector.js"></script>
   <script type="module" src="/lab-v2.js"></script>
 </body>
 </html>
