@@ -28,8 +28,6 @@ function normalizeSearchText(value) {
     .trim();
 }
 
-// Deliberately excludes social filler and application vocabulary. These tokens are
-// common in almost every room and caused unrelated memories to look "relevant".
 const MEMORY_QUERY_STOPWORDS = new Set([
   'a', 'an', 'the', 'and', 'or', 'to', 'of', 'for', 'with', 'on', 'in', 'is', 'are', 'be', 'this', 'that',
   'la', 'va', 'cua', 'cho', 'voi', 'cac', 'nhung', 'mot', 'nay', 'do', 'kia', 'thi', 'o', 'trong', 'di', 'nhe', 'nha',
@@ -70,7 +68,6 @@ function activationRule(memory, match) {
   const type = String(memory?.type || '').toLowerCase();
   if (!match.queryTokens || !match.shared) return false;
   if (match.explicitRecall) return match.relevance >= 0.05;
-
   if (type === 'semantic') return match.shared >= 1 && match.relevance >= 0.10;
   if (type === 'relationship' || type === 'procedural') return match.shared >= 1 && match.relevance >= 0.12;
   return match.shared >= 2 && match.relevance >= 0.16;
@@ -154,7 +151,6 @@ function memoryLabel(memory) {
   return String(memory.type || 'MEMORY').toUpperCase();
 }
 
-// Compatibility helper for callers that already have provider-formatted messages.
 export function memoryQueryFromMessages(messages = [], topic = '') {
   const recent = (Array.isArray(messages) ? messages : [])
     .filter((item) => item?.role === 'user')
@@ -166,9 +162,6 @@ export function memoryQueryFromMessages(messages = [], topic = '') {
   return `${cleanText(topic, 2000)}\n${recent}`.trim();
 }
 
-// Preferred query builder: only user/tool observations can activate cross-session
-// memory. Agent-generated text is excluded so a wrongly recalled memory cannot
-// snowball into more recalls on the next agent turn.
 export function memoryQueryFromHistory(history = [], topic = '') {
   const recent = (Array.isArray(history) ? history : [])
     .filter((item) => ['user', 'tool'].includes(String(item?.speaker || '').toLowerCase()))
@@ -192,6 +185,23 @@ export class AgentMemoryManager {
     this.maxCandidatesPerPass = Math.max(1, Math.min(20, Number(config.maxCandidatesPerPass) || 6));
     this.minImportance = clamp(config.minImportance, 0, 1, 0.35);
     this.maxItemChars = Math.max(300, Math.min(5000, Number(config.maxItemChars) || 1800));
+    this.ensureForgottenRunStore();
+  }
+
+  ensureForgottenRunStore() {
+    if (!this.store?.db?.exec) return;
+    this.store.db.exec(`
+      CREATE TABLE IF NOT EXISTS forgotten_memory_runs (
+        run_id TEXT PRIMARY KEY,
+        forgotten_at TEXT NOT NULL
+      );
+    `);
+  }
+
+  isRunForgotten(runId = '') {
+    const cleanRunId = cleanText(runId, 240);
+    if (!cleanRunId || !this.store?.db?.prepare) return false;
+    return Boolean(this.store.db.prepare('SELECT 1 FROM forgotten_memory_runs WHERE run_id = ? LIMIT 1').get(cleanRunId));
   }
 
   namespace(roomId = 'default-room') {
@@ -216,6 +226,7 @@ export class AgentMemoryManager {
     });
 
     return candidates
+      .filter((memory) => !this.isRunForgotten(memory.runId))
       .map((memory) => ({ memory, match: memoryMatch(query, `${memory.content} ${memory.key || ''}`) }))
       .filter(({ memory, match }) => activationRule(memory, match))
       .sort((a, b) => b.match.relevance - a.match.relevance || Number(b.memory.score || 0) - Number(a.memory.score || 0))
@@ -240,7 +251,7 @@ export class AgentMemoryManager {
   }
 
   rememberPrivateContext(entry, agentConfigs = {}, { roomId = 'default-room', runId = '' } = {}) {
-    if (!this.enabled || !entry?.id) return [];
+    if (!this.enabled || !entry?.id || this.isRunForgotten(runId)) return [];
     const senderId = cleanText(entry.senderId, 80).toLowerCase();
     const recipientId = cleanText(entry.recipientId, 80).toLowerCase();
     const content = cleanText(entry.content, this.maxItemChars * 3);
@@ -283,10 +294,25 @@ export class AgentMemoryManager {
       .filter(Boolean))]
       .slice(0, 200);
     if (!ids.length) return 0;
+
+    const now = new Date().toISOString();
+    const tombstone = this.store.db.prepare(`
+      INSERT INTO forgotten_memory_runs (run_id, forgotten_at) VALUES (?, ?)
+      ON CONFLICT(run_id) DO UPDATE SET forgotten_at = excluded.forgotten_at
+    `);
+    for (const id of ids) tombstone.run(id, now);
+
     const marks = ids.map(() => '?').join(', ');
     const result = this.store.db.prepare(
       `UPDATE agent_memories SET active = 0, updated_at = ? WHERE active = 1 AND run_id IN (${marks})`,
-    ).run(new Date().toISOString(), ...ids);
+    ).run(now, ...ids);
+
+    this.store.db.exec(`
+      DELETE FROM forgotten_memory_runs
+      WHERE run_id NOT IN (
+        SELECT run_id FROM forgotten_memory_runs ORDER BY forgotten_at DESC LIMIT 5000
+      );
+    `);
     return Number(result?.changes || 0);
   }
 
@@ -307,7 +333,7 @@ export class AgentMemoryManager {
     topic = '',
     signal,
   } = {}) {
-    if (!this.enabled || !provider?.streamChat || !Array.isArray(events) || !events.length) {
+    if (!this.enabled || this.isRunForgotten(runId) || !provider?.streamChat || !Array.isArray(events) || !events.length) {
       return { stored: [], usage: null, skipped: true };
     }
 
@@ -336,6 +362,10 @@ export class AgentMemoryManager {
       signal,
       onDelta: () => {},
     });
+
+    // A history deletion may arrive while the hidden consolidation call is in flight.
+    // Re-check before writing so a forgotten run cannot resurrect itself afterward.
+    if (this.isRunForgotten(runId)) return { stored: [], usage: result?.usage || null, skipped: true };
 
     const parsed = parseJsonPayload(result?.text);
     const rawMemories = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.memories) ? parsed.memories : [];
