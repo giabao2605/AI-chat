@@ -5,6 +5,70 @@ function chatEndpoint(baseUrl) {
   return `${normalized}/chat/completions`;
 }
 
+const ADAPTIVE_REASONING_TOOL_NAME = 'request_deeper_reasoning';
+const ADAPTIVE_REASONING_TOOL = {
+  type: 'function',
+  function: {
+    name: ADAPTIVE_REASONING_TOOL_NAME,
+    description: 'Chỉ gọi tool này khi lượt hiện tại không thể được xử lý đáng tin cậy bằng một lượt suy luận nhanh và việc dùng thêm compute sẽ cải thiện đáng kể độ đúng. Chọn medium hoặc high theo độ sâu thật sự cần thiết. Không gọi chỉ vì có memory, private context hoặc tool khác.',
+    parameters: {
+      type: 'object',
+      properties: {
+        effort: {
+          type: 'string',
+          enum: ['medium', 'high'],
+          description: 'Mức suy luận cần cho lần chạy lại.',
+        },
+        reason: {
+          type: 'string',
+          description: 'Lý do ngắn gọn vì sao lượt này cần thêm compute.',
+        },
+      },
+      required: ['effort'],
+      additionalProperties: false,
+    },
+  },
+};
+
+const REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh', 'max']);
+
+function adaptiveModel(model) {
+  return /^gpt-5\.6(?:-|$)/i.test(String(model || '').trim());
+}
+
+function normalizeReasoningEffort(value, fallback = '') {
+  const effort = String(value || '').trim().toLowerCase();
+  return REASONING_EFFORTS.has(effort) ? effort : fallback;
+}
+
+function normalizePromptCacheKey(value) {
+  return String(value || '').trim().replace(/[^a-zA-Z0-9_.:-]/g, '_').slice(0, 64);
+}
+
+function parseAdaptiveReasoningCall(call) {
+  if (String(call?.function?.name || '') !== ADAPTIVE_REASONING_TOOL_NAME) return null;
+  try {
+    const args = JSON.parse(String(call?.function?.arguments || '{}'));
+    return {
+      effort: ['medium', 'high'].includes(String(args?.effort || '').toLowerCase()) ? String(args.effort).toLowerCase() : 'medium',
+      reason: String(args?.reason || '').trim().slice(0, 500),
+    };
+  } catch {
+    return { effort: 'medium', reason: '' };
+  }
+}
+
+function mergeUsage(total, usage) {
+  if (!usage) return total;
+  if (!total) return { ...usage };
+  return {
+    inputTokens: Number(total.inputTokens || 0) + Number(usage.inputTokens || 0),
+    outputTokens: Number(total.outputTokens || 0) + Number(usage.outputTokens || 0),
+    totalTokens: Number(total.totalTokens || 0) + Number(usage.totalTokens || 0),
+    exact: total.exact !== false && usage.exact !== false,
+  };
+}
+
 function imagePartUrl(part) {
   const raw = typeof part?.image_url === 'string' ? part.image_url : part?.image_url?.url;
   const url = String(raw || '').trim();
@@ -188,6 +252,8 @@ export class OpenAICompatibleProvider {
     this.visionSupport = null;
     this.toolSupport = null;
     this.streamUsageSupport = null;
+    this.reasoningControlSupport = adaptiveModel(model) ? null : false;
+    this.promptCacheSupport = adaptiveModel(model) ? null : false;
   }
 
   circuitState(now = Date.now()) {
@@ -244,114 +310,207 @@ export class OpenAICompatibleProvider {
     onDelta = () => {},
     tools = [],
     toolChoice = 'auto',
+    reasoningEffort = '',
+    adaptiveReasoning = false,
+    promptCacheKey = '',
   }) {
     const providerMessages = normalizeMessagesForProvider(messages);
     const multimodal = hasImageInput(providerMessages);
-    let visionFallback = multimodal && this.visionSupport === false;
-    const requestedTools = Array.isArray(tools) ? tools.filter(Boolean) : [];
-    let useTools = requestedTools.length > 0 && this.toolSupport !== false;
-    let toolFallback = requestedTools.length > 0 && this.toolSupport === false;
-    let requestCount = 0;
+    const externalTools = Array.isArray(tools) ? tools.filter(Boolean) : [];
+    const modelCanAdapt = adaptiveModel(this.model);
+    const cacheKey = modelCanAdapt ? normalizePromptCacheKey(promptCacheKey) : '';
+    const initialEffort = normalizeReasoningEffort(reasoningEffort, adaptiveReasoning && modelCanAdapt ? 'low' : '');
+    let totalRequestCount = 0;
 
-    const makeBody = () => ({
-      model: this.model,
-      messages: visionFallback ? toTextOnlyMessages(providerMessages) : providerMessages,
-      stream: true,
-      temperature,
-      max_tokens: maxOutputTokens,
-      ...(useTools ? { tools: requestedTools, tool_choice: toolChoice || 'auto' } : {}),
-    });
+    const performPass = async ({ effort = '', allowEscalation = false } = {}) => {
+      let visionFallback = multimodal && this.visionSupport === false;
+      let reasoningControls = modelCanAdapt && this.reasoningControlSupport !== false;
+      let cacheControls = Boolean(modelCanAdapt && cacheKey && this.promptCacheSupport !== false);
+      const toolsForState = () => [
+        ...externalTools,
+        ...(reasoningControls && allowEscalation ? [ADAPTIVE_REASONING_TOOL] : []),
+      ];
+      let useTools = toolsForState().length > 0 && this.toolSupport !== false;
+      let toolFallback = toolsForState().length > 0 && this.toolSupport === false;
+      let requestCount = 0;
+      let body = null;
 
-    const doRequest = async (body, includeUsage) => {
-      requestCount += 1;
-      return requestStream({ endpoint: this.endpoint, apiKey: this.apiKey, body, signal, includeUsage, timeoutMs: this.timeoutMs });
-    };
+      const makeBody = () => {
+        const currentTools = toolsForState();
+        return {
+          model: this.model,
+          messages: visionFallback ? toTextOnlyMessages(providerMessages) : providerMessages,
+          stream: true,
+          temperature,
+          max_tokens: maxOutputTokens,
+          ...(reasoningControls && effort ? { reasoning_effort: effort } : {}),
+          ...(cacheControls && cacheKey ? { prompt_cache_key: cacheKey } : {}),
+          ...(useTools && currentTools.length ? {
+            tools: currentTools,
+            tool_choice: toolChoice || 'auto',
+            parallel_tool_calls: true,
+          } : {}),
+        };
+      };
 
-    let body = makeBody();
-    let includeUsage = this.streamUsageSupport !== false;
-    let response = await doRequest(body, includeUsage);
+      const doRequest = async (includeUsage) => {
+        requestCount += 1;
+        totalRequestCount += 1;
+        body = makeBody();
+        return requestStream({ endpoint: this.endpoint, apiKey: this.apiKey, body, signal, includeUsage, timeoutMs: this.timeoutMs });
+      };
 
-    if (!response.ok && includeUsage && [400, 404, 422].includes(response.status)) {
-      const retry = await doRequest(body, false);
-      if (retry.ok) this.streamUsageSupport = false;
-      response = retry;
-      includeUsage = false;
-    } else if (response.ok && includeUsage) {
-      this.streamUsageSupport = true;
-    }
+      let includeUsage = this.streamUsageSupport !== false;
+      let response = await doRequest(includeUsage);
 
-    if (!response.ok && multimodal && !visionFallback && [400, 404, 415, 422].includes(response.status)) {
-      visionFallback = true;
-      body = makeBody();
-      response = await doRequest(body, false);
-      if (response.ok) this.visionSupport = false;
-    }
-
-    if (!response.ok && useTools && [400, 404, 415, 422].includes(response.status)) {
-      useTools = false;
-      toolFallback = true;
-      body = makeBody();
-      response = await doRequest(body, false);
-      if (response.ok) this.toolSupport = false;
-    }
-
-    if (!response.ok) {
-      const errorText = (await response.text()).slice(0, 2000);
-      throw new Error(`Provider returned HTTP ${response.status}: ${errorText || response.statusText}`);
-    }
-
-    if (multimodal && !visionFallback) this.visionSupport = true;
-    if (requestedTools.length > 0 && useTools) this.toolSupport = true;
-    if (!response.body) throw new Error('Provider returned no response body.');
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let fullText = '';
-    let usage = null;
-    const toolCallChunks = [];
-
-    const consumeLine = (line) => {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith('data:')) return;
-      const data = trimmed.slice(5).trim();
-      if (!data || data === '[DONE]') return;
-      let payload;
-      try { payload = JSON.parse(data); } catch { return; }
-      const delta = extractDelta(payload);
-      if (delta) {
-        fullText += delta;
-        onDelta(delta);
+      if (!response.ok && includeUsage && [400, 404, 422].includes(response.status)) {
+        const retry = await doRequest(false);
+        if (retry.ok) this.streamUsageSupport = false;
+        response = retry;
+        includeUsage = false;
+      } else if (response.ok && includeUsage) {
+        this.streamUsageSupport = true;
       }
-      collectToolCallDeltas(payload, toolCallChunks);
-      const normalized = normalizeUsage(payload.usage);
-      if (normalized) usage = normalized;
+
+      // OpenAI-compatible gateways often lag individual GPT-5.6 fields. Negotiate
+      // cache and reasoning independently so lack of prompt-cache support never forces
+      // Luna back to its slower default reasoning effort.
+      if (!response.ok && cacheControls && [400, 404, 422].includes(response.status)) {
+        cacheControls = false;
+        const retry = await doRequest(false);
+        if (retry.ok) this.promptCacheSupport = false;
+        response = retry;
+      }
+
+      if (!response.ok && reasoningControls && effort && [400, 404, 422].includes(response.status)) {
+        reasoningControls = false;
+        useTools = toolsForState().length > 0 && this.toolSupport !== false;
+        const retry = await doRequest(false);
+        if (retry.ok) {
+          this.reasoningControlSupport = false;
+          if (cacheKey && !cacheControls) this.promptCacheSupport = false;
+        }
+        response = retry;
+      }
+
+      if (!response.ok && multimodal && !visionFallback && [400, 404, 415, 422].includes(response.status)) {
+        visionFallback = true;
+        response = await doRequest(false);
+        if (response.ok) this.visionSupport = false;
+      }
+
+      if (!response.ok && useTools && [400, 404, 415, 422].includes(response.status)) {
+        useTools = false;
+        toolFallback = true;
+        response = await doRequest(false);
+        if (response.ok) this.toolSupport = false;
+      }
+
+      if (!response.ok) {
+        const errorText = (await response.text()).slice(0, 2000);
+        throw new Error(`Provider returned HTTP ${response.status}: ${errorText || response.statusText}`);
+      }
+
+      if (multimodal && !visionFallback) this.visionSupport = true;
+      if (toolsForState().length > 0 && useTools) this.toolSupport = true;
+      if (reasoningControls && effort) this.reasoningControlSupport = true;
+      if (cacheControls && cacheKey) this.promptCacheSupport = true;
+      if (!response.body) throw new Error('Provider returned no response body.');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const passStarted = Date.now();
+      let firstSignalAt = 0;
+      let buffer = '';
+      let fullText = '';
+      let usage = null;
+      const toolCallChunks = [];
+
+      const consumeLine = (line) => {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) return;
+        const data = trimmed.slice(5).trim();
+        if (!data || data === '[DONE]') return;
+        let payload;
+        try { payload = JSON.parse(data); } catch { return; }
+        const delta = extractDelta(payload);
+        const beforeToolCount = toolCallChunks.filter(Boolean).length;
+        collectToolCallDeltas(payload, toolCallChunks);
+        if (!firstSignalAt && (delta || toolCallChunks.filter(Boolean).length > beforeToolCount)) firstSignalAt = Date.now();
+        if (delta) {
+          fullText += delta;
+          onDelta(delta);
+        }
+        const normalized = normalizeUsage(payload.usage);
+        if (normalized) usage = normalized;
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || '';
+        for (const line of lines) consumeLine(line);
+      }
+      buffer += decoder.decode();
+      if (buffer) consumeLine(buffer);
+
+      const normalizedCalls = normalizeToolCalls(toolCallChunks);
+      return {
+        text: fullText.trim(),
+        toolCalls: normalizedCalls,
+        usage: usage || estimateUsage(body.messages, fullText),
+        visionFallback,
+        visionAccepted: multimodal && !visionFallback,
+        toolFallback,
+        toolsAccepted: toolsForState().length > 0 && useTools,
+        diagnostics: {
+          requestCount,
+          firstSignalMs: firstSignalAt ? firstSignalAt - passStarted : null,
+          streamUsageSupport: this.streamUsageSupport,
+          visionSupport: this.visionSupport,
+          toolSupport: this.toolSupport,
+          reasoningControlSupport: this.reasoningControlSupport,
+          promptCacheSupport: this.promptCacheSupport,
+          reasoningEffort: reasoningControls ? effort || null : null,
+          promptCacheKeyUsed: Boolean(cacheControls && cacheKey),
+        },
+      };
     };
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() || '';
-      for (const line of lines) consumeLine(line);
-    }
-    buffer += decoder.decode();
-    if (buffer) consumeLine(buffer);
+    const first = await performPass({
+      effort: initialEffort,
+      allowEscalation: Boolean(adaptiveReasoning && modelCanAdapt && this.reasoningControlSupport !== false),
+    });
+    const adaptiveCall = first.toolCalls.map(parseAdaptiveReasoningCall).find(Boolean) || null;
+    const externalFirstCalls = first.toolCalls.filter((call) => call?.function?.name !== ADAPTIVE_REASONING_TOOL_NAME);
 
+    if (!adaptiveCall || first.text || externalFirstCalls.length || this.reasoningControlSupport === false) {
+      return {
+        ...first,
+        toolCalls: externalFirstCalls,
+        diagnostics: {
+          ...(first.diagnostics || {}),
+          requestCount: totalRequestCount,
+          adaptiveReasoning: Boolean(adaptiveReasoning && modelCanAdapt),
+          adaptiveEscalated: false,
+        },
+      };
+    }
+
+    const deeper = await performPass({ effort: adaptiveCall.effort, allowEscalation: false });
     return {
-      text: fullText.trim(),
-      toolCalls: normalizeToolCalls(toolCallChunks),
-      usage: usage || estimateUsage(body.messages, fullText),
-      visionFallback,
-      visionAccepted: multimodal && !visionFallback,
-      toolFallback,
-      toolsAccepted: requestedTools.length > 0 && useTools,
+      ...deeper,
+      usage: mergeUsage(first.usage, deeper.usage),
       diagnostics: {
-        requestCount,
-        streamUsageSupport: this.streamUsageSupport,
-        visionSupport: this.visionSupport,
-        toolSupport: this.toolSupport,
+        ...(deeper.diagnostics || {}),
+        requestCount: totalRequestCount,
+        adaptiveReasoning: true,
+        adaptiveEscalated: true,
+        adaptiveFromEffort: initialEffort || 'low',
+        adaptiveToEffort: adaptiveCall.effort,
+        adaptiveReason: adaptiveCall.reason,
       },
     };
   }
