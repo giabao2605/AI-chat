@@ -1,9 +1,10 @@
 const RESUMABLE_STATUSES = new Set(['completed', 'stopped', 'error']);
 const ACTIVE_STATUSES = new Set(['starting', 'running', 'paused', 'pausing']);
+const AI_SPEAKERS = new Set(['a', 'b', 'c', 'd', 'e', 'f']);
 
 export function countHistoryAiTurns(history = []) {
   return (Array.isArray(history) ? history : []).reduce(
-    (count, item) => count + (item?.speaker === 'a' || item?.speaker === 'b' ? 1 : 0),
+    (count, item) => count + (AI_SPEAKERS.has(item?.speaker) ? 1 : 0),
     0,
   );
 }
