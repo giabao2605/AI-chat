@@ -24,7 +24,7 @@ function mountInspector() {
           <div>
             <div class="eyebrow">MEMORY INSPECTOR</div>
             <h2>Ký ức dài hạn</h2>
-            <p>Xem memory thực tế trong SQLite và preview memory nào sẽ được recall với một query cụ thể.</p>
+            <p>Chỉ hiển thị memory được chọn lọc để dùng xuyên phiên. Private Context của phiên hiện tại nằm ở inspector riêng.</p>
           </div>
           <button id="closeMemoryInspectorBtn" class="icon-button" type="button" title="Đóng">×</button>
         </div>
@@ -41,7 +41,7 @@ function mountInspector() {
         </div>
         <div class="memory-inspector-body">
           <div id="memoryInspectorSummary" class="memory-inspector-summary">Chưa tải memory.</div>
-          <div id="memoryInspectorEmpty" class="memory-inspector-empty hidden">Agent này chưa có memory phù hợp với bộ lọc hiện tại.</div>
+          <div id="memoryInspectorEmpty" class="memory-inspector-empty hidden">Agent này chưa có long-term memory phù hợp với bộ lọc hiện tại.</div>
           <div id="memoryInspectorList" class="memory-inspector-list"></div>
         </div>
       </aside>
@@ -101,7 +101,6 @@ function memoryTypeLabel(type) {
     episodic: 'Episode',
     belief: 'Belief',
     relationship: 'Relationship',
-    private: 'Private',
     procedural: 'Procedural',
   })[type] || type || 'Memory';
 }
@@ -182,10 +181,13 @@ function cardHtml(memory) {
 }
 
 function render(data) {
-  const memories = Array.isArray(data.memories) ? data.memories : [];
+  // Legacy builds used to auto-copy every private delivery into SQLite as type=private.
+  // Those rows are no longer part of long-term memory and stay hidden here even when
+  // inactive audit rows are requested. Private Context has its own inspector.
+  const memories = (Array.isArray(data.memories) ? data.memories : []).filter((item) => item.type !== 'private');
   const active = memories.filter((item) => item.active !== false).length;
   const recall = memories.filter((item) => item.wouldRecall).length;
-  els.summary.textContent = `${memories.length} memory · ${active} active${data.query ? ` · ${recall} sẽ recall` : ''}`;
+  els.summary.textContent = `${memories.length} long-term memory · ${active} active${data.query ? ` · ${recall} sẽ recall` : ''}`;
   els.empty.classList.toggle('hidden', memories.length > 0);
   els.list.innerHTML = memories.map(cardHtml).join('');
 }
@@ -196,7 +198,7 @@ async function loadMemories() {
   if (!agentId) return;
   loading = true;
   els.refreshBtn.disabled = true;
-  els.summary.textContent = 'Đang đọc memory…';
+  els.summary.textContent = 'Đang đọc long-term memory…';
   try {
     const params = new URLSearchParams({
       agent: agentId,
@@ -244,7 +246,7 @@ async function clearAgent() {
   const agentId = els.agentSelect.value;
   const name = els.agentSelect.selectedOptions[0]?.textContent || agentId;
   if (!agentId) return;
-  if (!window.confirm(`Quên toàn bộ active memory của ${name}? Hành động này không xóa lịch sử chat.`)) return;
+  if (!window.confirm(`Quên toàn bộ active long-term memory của ${name}? Hành động này không xóa lịch sử chat hoặc Private Context của phiên.`)) return;
   await api('/api/memory/clear-agent', {
     method: 'POST',
     body: JSON.stringify({ agentId }),
