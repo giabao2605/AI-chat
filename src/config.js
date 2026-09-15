@@ -14,7 +14,8 @@ Mục tiêu:
 
 Hãy chỉ viết phần lời thoại của chính bạn.`;
 
-export const AGENT_IDS = ['a', 'b', 'c', 'd'];
+export const AGENT_IDS = ['a', 'b', 'c', 'd', 'e', 'f'];
+const REQUIRED_AGENT_IDS = new Set(['a', 'b']);
 
 function cleanBaseUrl(value) {
   return String(value || '').trim().replace(/\/+$/, '');
@@ -51,7 +52,7 @@ export function getAgentConfig(id) {
   return {
     id: normalized,
     name: String(process.env[`${prefix}_NAME`] || '').trim() || model || fallbackName,
-    apiKey: process.env[`${prefix}_API_KEY`] || '',
+    apiKey: process.env[`${prefix}_API_KEY`] || process.env.PROVIDER_API_KEY || '',
     model,
     baseUrl: cleanBaseUrl(process.env[`${prefix}_BASE_URL`] || process.env.PROVIDER_BASE_URL),
     timeoutMs: Math.max(5_000, intFromEnv(`${prefix}_TIMEOUT_MS`, intFromEnv('PROVIDER_TIMEOUT_MS', 120_000))),
@@ -177,14 +178,14 @@ export function getServerConfig() {
 export function getPublicConfig() {
   const allAgents = getAllAgentConfigs();
   const agents = Object.fromEntries(Object.entries(allAgents)
-    .filter(([id, agent]) => ['a', 'b'].includes(id) || Boolean(agent.apiKey && agent.model && agent.baseUrl))
+    .filter(([id, agent]) => REQUIRED_AGENT_IDS.has(id) || Boolean(agent.apiKey && agent.model && agent.baseUrl))
     .map(([id, agent]) => [id, {
       id,
       name: agent.name,
       model: agent.model,
       baseUrl: agent.baseUrl,
       configured: Boolean(agent.apiKey && agent.model && agent.baseUrl),
-      optional: ['c', 'd'].includes(id),
+      optional: !REQUIRED_AGENT_IDS.has(id),
     }]));
   const webSearch = getWebSearchConfig();
   const deepResearch = getDeepResearchConfig();
