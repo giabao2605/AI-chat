@@ -36,11 +36,29 @@ export class MemoryProfiledRoom extends ProfiledRoom {
     this.memoryErrorFlushedRunId = '';
     this.memoryStatsCache = Object.fromEntries(this.agentIds.map((id) => [id, { total: 0, byType: {} }]));
     this.lastMemoryRetrieval = Object.fromEntries(this.agentIds.map((id) => [id, { count: 0, at: null }]));
+    this.legacyPrivateContextDeactivated = this.deactivateLegacyPrivateContextMemories();
     this.refreshMemoryStats();
   }
 
   memoryEnabled() {
     return Boolean(this.memoryManager?.enabled);
+  }
+
+  deactivateLegacyPrivateContextMemories() {
+    if (!this.memoryEnabled() || !this.memoryManager?.store?.db?.prepare) return 0;
+    try {
+      const result = this.memoryManager.store.db.prepare(`
+        UPDATE agent_memories
+        SET active = 0, updated_at = ?
+        WHERE active = 1
+          AND memory_type = 'private'
+          AND source_type = 'private_context'
+      `).run(new Date().toISOString());
+      return Number(result?.changes || 0);
+    } catch (error) {
+      this.recordDebug?.('memory:legacy-private-migration-error', { message: error?.message || String(error) });
+      return 0;
+    }
   }
 
   resetMemoryRuntime(cursor = 0) {
@@ -157,29 +175,10 @@ export class MemoryProfiledRoom extends ProfiledRoom {
   }
 
   recordPrivateContext(senderId, recipientId, content) {
-    const entry = super.recordPrivateContext(senderId, recipientId, content);
-    if (entry && this.memoryEnabled()) {
-      try {
-        const stored = this.memoryManager.rememberPrivateContext(entry, this.agentConfigs, {
-          roomId: this.roomId,
-          runId: this.runId,
-        });
-        this.refreshMemoryStats(senderId);
-        this.refreshMemoryStats(recipientId);
-        this.recordDebug('memory:private-stored', {
-          privateContextId: entry.id,
-          senderId,
-          recipientId,
-          stored: stored.length,
-        });
-      } catch (error) {
-        this.recordDebug('memory:private-error', {
-          privateContextId: entry.id,
-          message: error?.message || String(error),
-        });
-      }
-    }
-    return entry;
+    // Private context is session state, not long-term memory. It remains available
+    // to sender + recipient through ProfiledRoom and is persisted only with the
+    // resumable session snapshot. Do not auto-promote it into SQLite memory.
+    return super.recordPrivateContext(senderId, recipientId, content);
   }
 
   queueMemoryConsolidation(agentId, { force = false } = {}) {
