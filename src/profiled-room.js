@@ -193,8 +193,6 @@ export class ProfiledRoom extends ParallelBatchRoom {
     return {
       ...base,
       agentProfiles: Object.fromEntries(Object.entries(this.agentProfiles || {}).map(([id, profile]) => [id, { ...profile }])),
-      // The operator/client may persist these so a resumed session keeps its hidden state.
-      // They are never copied into the shared transcript sent to other agents.
       privateContexts: this.privateContexts.map((entry) => ({ ...entry })),
       privateContextStats: { total: this.privateContexts.length, byAgent },
     };
@@ -208,7 +206,7 @@ export class ProfiledRoom extends ParallelBatchRoom {
       ...PRIVATE_CONTEXT_TOOL,
       function: {
         ...PRIVATE_CONTEXT_TOOL.function,
-        description: `${PRIVATE_CONTEXT_TOOL.function.description} Agent đích hợp lệ hiện tại: ${labels}. Chỉ dùng private context khi thông tin kín thực sự giúp agent khác phối hợp, quyết định hoặc hành động tốt hơn; đây không phải bước mặc định trước mọi câu trả lời. Nếu cần nhiều recipient, gom thành nhiều tool calls trong cùng một response thay vì gửi tuần tự qua nhiều vòng.`,
+        description: `${PRIVATE_CONTEXT_TOOL.function.description} Agent đích hợp lệ hiện tại: ${labels}. Chỉ dùng private context khi thông tin kín thực sự giúp agent khác phối hợp, quyết định hoặc hành động tốt hơn; đây không phải bước mặc định trước mọi câu trả lời. Nếu cần nhiều recipient, gom thành nhiều tool calls trong cùng một response. Khi đã biết câu trả lời công khai, đặt public_reply vào đúng một call (hoặc cùng một giá trị ở các call) để backend hoàn tất lượt mà không cần gọi model lần hai.`,
         parameters: {
           ...PRIVATE_CONTEXT_TOOL.function.parameters,
           properties: {
@@ -250,8 +248,6 @@ export class ProfiledRoom extends ParallelBatchRoom {
     return `<private_agent_context>\n${selected.join('\n')}\n</private_agent_context>`;
   }
 
-  // Backward-compatible name used by tests/debug code. The payload is now dynamic data,
-  // not a system instruction, but visibility/isolation semantics are unchanged.
   privateContextSystemBlock(agentId) {
     return this.privateContextDataBlock(agentId);
   }
@@ -345,12 +341,14 @@ export class ProfiledRoom extends ParallelBatchRoom {
             privateContextProviderCalls: providerCalls,
             privateContextCalls: this.privateToolCallsUsed[agentId] || 0,
             privateContextRounds: privateRounds,
+            privateContextOnePass: false,
           },
         };
       }
 
       privateRounds += 1;
       const deliveryResults = [];
+      const publicReplies = [];
       for (const call of privateCalls) {
         if ((this.privateToolCallsUsed[agentId] || 0) >= maxMessages) break;
         this.privateToolCallsUsed[agentId] = (this.privateToolCallsUsed[agentId] || 0) + 1;
@@ -358,8 +356,10 @@ export class ProfiledRoom extends ParallelBatchRoom {
           allowedRecipients: this.agentIds,
           senderId: agentId,
           maxContentLength: 8000,
+          maxPublicReplyLength: 20000,
         });
         if (!parsed) continue;
+        if (parsed.publicReply) publicReplies.push(parsed.publicReply);
         if (parsed.error) {
           deliveryResults.push(this.privateToolResultText(agentId, parsed));
           continue;
@@ -379,6 +379,31 @@ export class ProfiledRoom extends ParallelBatchRoom {
             privateContextProviderCalls: providerCalls,
             privateContextCalls: this.privateToolCallsUsed[agentId] || 0,
             privateContextRounds: privateRounds,
+            privateContextOnePass: false,
+          },
+        };
+      }
+
+      const publicReply = publicReplies.find((value) => value.trim()) || '';
+      const onePassText = aggregateText || publicReply;
+      if (onePassText) {
+        if (publicReplies.length > 1 && new Set(publicReplies).size > 1) {
+          this.recordDebug('private-context:public-reply-conflict', {
+            agentId,
+            count: publicReplies.length,
+          });
+        }
+        return {
+          ...result,
+          text: onePassText,
+          usage: aggregateUsage || result.usage || null,
+          toolCalls: [],
+          diagnostics: {
+            ...(result.diagnostics || {}),
+            privateContextProviderCalls: providerCalls,
+            privateContextCalls: this.privateToolCallsUsed[agentId] || 0,
+            privateContextRounds: privateRounds,
+            privateContextOnePass: true,
           },
         };
       }
@@ -390,7 +415,7 @@ export class ProfiledRoom extends ParallelBatchRoom {
         ...workingMessages,
         {
           role: 'user',
-          content: `<private_context_tool_result>\n${resultText}\nTiếp tục lượt của bạn. Không lặp lại secret trong câu trả lời công khai.\n</private_context_tool_result>`,
+          content: `<private_context_tool_result>\n${resultText}\nTiếp tục lượt của bạn. Không lặp lại secret trong câu trả lời công khai. Nếu còn cần gửi private context khác, chỉ gửi khi thật sự cần.\n</private_context_tool_result>`,
         },
       ];
     }
@@ -405,6 +430,7 @@ export class ProfiledRoom extends ParallelBatchRoom {
         privateContextProviderCalls: providerCalls,
         privateContextCalls: this.privateToolCallsUsed[agentId] || 0,
         privateContextRounds: privateRounds,
+        privateContextOnePass: false,
       },
     };
   }
@@ -469,9 +495,6 @@ export class ProfiledRoom extends ParallelBatchRoom {
       return { used: false, background: false, ms: 0, covered: cutoff };
     }
 
-    // Keep the current turn lossless enough without putting a hidden model call on its
-    // critical path. Preserve both the prior compact summary and recent uncovered data,
-    // then replace this provisional digest with a better model summary in the background.
     this.contextSummary = boundedProvisionalSummary(previousSummary, transcript, this.contextConfig.maxSummaryChars);
     this.summaryCoveredIndex = cutoff;
     this.recordDebug('context:summary-provisional', {
