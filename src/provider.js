@@ -252,7 +252,8 @@ export class OpenAICompatibleProvider {
     this.visionSupport = null;
     this.toolSupport = null;
     this.streamUsageSupport = null;
-    this.advancedControlSupport = adaptiveModel(model) ? true : null;
+    this.reasoningControlSupport = adaptiveModel(model) ? null : false;
+    this.promptCacheSupport = adaptiveModel(model) ? null : false;
   }
 
   circuitState(now = Date.now()) {
@@ -316,32 +317,41 @@ export class OpenAICompatibleProvider {
     const providerMessages = normalizeMessagesForProvider(messages);
     const multimodal = hasImageInput(providerMessages);
     const externalTools = Array.isArray(tools) ? tools.filter(Boolean) : [];
-    const canUseAdvancedControls = adaptiveModel(this.model) && this.advancedControlSupport !== false;
-    const initialEffort = normalizeReasoningEffort(reasoningEffort, adaptiveReasoning && canUseAdvancedControls ? 'low' : '');
-    const cacheKey = canUseAdvancedControls ? normalizePromptCacheKey(promptCacheKey) : '';
+    const modelCanAdapt = adaptiveModel(this.model);
+    const cacheKey = modelCanAdapt ? normalizePromptCacheKey(promptCacheKey) : '';
+    const initialEffort = normalizeReasoningEffort(reasoningEffort, adaptiveReasoning && modelCanAdapt ? 'low' : '');
     let totalRequestCount = 0;
 
     const performPass = async ({ effort = '', allowEscalation = false } = {}) => {
       let visionFallback = multimodal && this.visionSupport === false;
-      let advancedControls = canUseAdvancedControls && this.advancedControlSupport !== false;
-      const toolsForPass = advancedControls && allowEscalation
-        ? [...externalTools, ADAPTIVE_REASONING_TOOL]
-        : externalTools;
-      let useTools = toolsForPass.length > 0 && this.toolSupport !== false;
-      let toolFallback = toolsForPass.length > 0 && this.toolSupport === false;
+      let reasoningControls = modelCanAdapt && this.reasoningControlSupport !== false;
+      let cacheControls = Boolean(modelCanAdapt && cacheKey && this.promptCacheSupport !== false);
+      const toolsForState = () => [
+        ...externalTools,
+        ...(reasoningControls && allowEscalation ? [ADAPTIVE_REASONING_TOOL] : []),
+      ];
+      let useTools = toolsForState().length > 0 && this.toolSupport !== false;
+      let toolFallback = toolsForState().length > 0 && this.toolSupport === false;
       let requestCount = 0;
       let body = null;
 
-      const makeBody = () => ({
-        model: this.model,
-        messages: visionFallback ? toTextOnlyMessages(providerMessages) : providerMessages,
-        stream: true,
-        temperature,
-        max_tokens: maxOutputTokens,
-        ...(advancedControls && effort ? { reasoning_effort: effort } : {}),
-        ...(advancedControls && cacheKey ? { prompt_cache_key: cacheKey } : {}),
-        ...(useTools ? { tools: advancedControls && allowEscalation ? [...externalTools, ADAPTIVE_REASONING_TOOL] : externalTools, tool_choice: toolChoice || 'auto' } : {}),
-      });
+      const makeBody = () => {
+        const currentTools = toolsForState();
+        return {
+          model: this.model,
+          messages: visionFallback ? toTextOnlyMessages(providerMessages) : providerMessages,
+          stream: true,
+          temperature,
+          max_tokens: maxOutputTokens,
+          ...(reasoningControls && effort ? { reasoning_effort: effort } : {}),
+          ...(cacheControls && cacheKey ? { prompt_cache_key: cacheKey } : {}),
+          ...(useTools && currentTools.length ? {
+            tools: currentTools,
+            tool_choice: toolChoice || 'auto',
+            parallel_tool_calls: true,
+          } : {}),
+        };
+      };
 
       const doRequest = async (includeUsage) => {
         requestCount += 1;
@@ -362,10 +372,24 @@ export class OpenAICompatibleProvider {
         this.streamUsageSupport = true;
       }
 
-      if (!response.ok && advancedControls && [400, 404, 422].includes(response.status)) {
-        advancedControls = false;
+      // OpenAI-compatible gateways often lag individual GPT-5.6 fields. Negotiate
+      // cache and reasoning independently so lack of prompt-cache support never forces
+      // Luna back to its slower default reasoning effort.
+      if (!response.ok && cacheControls && [400, 404, 422].includes(response.status)) {
+        cacheControls = false;
         const retry = await doRequest(false);
-        if (retry.ok) this.advancedControlSupport = false;
+        if (retry.ok) this.promptCacheSupport = false;
+        response = retry;
+      }
+
+      if (!response.ok && reasoningControls && effort && [400, 404, 422].includes(response.status)) {
+        reasoningControls = false;
+        useTools = toolsForState().length > 0 && this.toolSupport !== false;
+        const retry = await doRequest(false);
+        if (retry.ok) {
+          this.reasoningControlSupport = false;
+          if (cacheKey && !cacheControls) this.promptCacheSupport = false;
+        }
         response = retry;
       }
 
@@ -388,8 +412,9 @@ export class OpenAICompatibleProvider {
       }
 
       if (multimodal && !visionFallback) this.visionSupport = true;
-      if (toolsForPass.length > 0 && useTools) this.toolSupport = true;
-      if (advancedControls) this.advancedControlSupport = true;
+      if (toolsForState().length > 0 && useTools) this.toolSupport = true;
+      if (reasoningControls && effort) this.reasoningControlSupport = true;
+      if (cacheControls && cacheKey) this.promptCacheSupport = true;
       if (!response.body) throw new Error('Provider returned no response body.');
 
       const reader = response.body.getReader();
@@ -439,35 +464,36 @@ export class OpenAICompatibleProvider {
         visionFallback,
         visionAccepted: multimodal && !visionFallback,
         toolFallback,
-        toolsAccepted: toolsForPass.length > 0 && useTools,
+        toolsAccepted: toolsForState().length > 0 && useTools,
         diagnostics: {
           requestCount,
           firstSignalMs: firstSignalAt ? firstSignalAt - passStarted : null,
           streamUsageSupport: this.streamUsageSupport,
           visionSupport: this.visionSupport,
           toolSupport: this.toolSupport,
-          advancedControlSupport: this.advancedControlSupport,
-          reasoningEffort: advancedControls ? effort || null : null,
-          promptCacheKeyUsed: Boolean(advancedControls && cacheKey),
+          reasoningControlSupport: this.reasoningControlSupport,
+          promptCacheSupport: this.promptCacheSupport,
+          reasoningEffort: reasoningControls ? effort || null : null,
+          promptCacheKeyUsed: Boolean(cacheControls && cacheKey),
         },
       };
     };
 
     const first = await performPass({
       effort: initialEffort,
-      allowEscalation: Boolean(adaptiveReasoning && canUseAdvancedControls),
+      allowEscalation: Boolean(adaptiveReasoning && modelCanAdapt && this.reasoningControlSupport !== false),
     });
     const adaptiveCall = first.toolCalls.map(parseAdaptiveReasoningCall).find(Boolean) || null;
     const externalFirstCalls = first.toolCalls.filter((call) => call?.function?.name !== ADAPTIVE_REASONING_TOOL_NAME);
 
-    if (!adaptiveCall || first.text || this.advancedControlSupport === false) {
+    if (!adaptiveCall || first.text || externalFirstCalls.length || this.reasoningControlSupport === false) {
       return {
         ...first,
         toolCalls: externalFirstCalls,
         diagnostics: {
           ...(first.diagnostics || {}),
           requestCount: totalRequestCount,
-          adaptiveReasoning: Boolean(adaptiveReasoning && canUseAdvancedControls),
+          adaptiveReasoning: Boolean(adaptiveReasoning && modelCanAdapt),
           adaptiveEscalated: false,
         },
       };
