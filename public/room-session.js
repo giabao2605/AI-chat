@@ -1,4 +1,5 @@
 import { readAgentProfiles } from './agent-profiles.js';
+import './memory-inspector.js';
 
 const ROOM_KEY = 'ai-chat-room-id-v2';
 const EXTRA_PERSONAS_KEY = 'ai-chat-extra-personas-v1';
