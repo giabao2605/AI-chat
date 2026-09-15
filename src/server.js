@@ -19,7 +19,7 @@ import { AgentMemoryManager } from './agent-memory.js';
 import { CloudflareImageTool } from './cloudflare-image-tool.js';
 import { createImageContextResolver } from './image-context.js';
 import { OpenAICompatibleImageTool } from './image-tool.js';
-import { MemoryProfiledRoom } from './memory-profiled-room.js';
+import { ReasoningMemoryProfiledRoom } from './reasoning-memory-room.js';
 import { SqliteMemoryStore } from './memory-store.js';
 import { RoomManager } from './room-manager.js';
 import { resolveRequestRoomId } from './room-routing.js';
@@ -83,7 +83,7 @@ const manager = new RoomManager({
   maxRooms: serverConfig.maxRooms,
   roomTtlMs: serverConfig.roomTtlMs,
   createRoom(roomId) {
-    const room = new MemoryProfiledRoom({
+    const room = new ReasoningMemoryProfiledRoom({
       roomId,
       memoryManager,
       agents: configuredAgents,
@@ -266,6 +266,10 @@ async function handleApi(req, res, url) {
 
   const room = manager.get(roomId).room;
 
+  if (pathname === '/api/reasoning-mode') {
+    const next = await room.setReasoningMode(body.mode, { probe: body.mode !== 'auto' });
+    return json(res, 200, next);
+  }
   if (pathname === '/api/start') return json(res, 200, await room.start(body));
   if (pathname === '/api/continue') return json(res, 200, await room.continueFromHistory(body));
   if (pathname === '/api/pause') { room.pause(); return json(res, 200, room.snapshot()); }
