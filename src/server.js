@@ -130,6 +130,20 @@ function requestRoomId(req, url) {
   });
 }
 
+function cleanAgentId(value) {
+  return String(value || '').trim().toLowerCase().slice(0, 80);
+}
+
+function requireConfiguredAgent(value) {
+  const agentId = cleanAgentId(value);
+  if (!agentId || !configuredAgents[agentId]) throw new Error('Agent không hợp lệ hoặc chưa được cấu hình.');
+  return agentId;
+}
+
+function refreshAllMemoryStats() {
+  for (const record of manager.rooms.values()) record.room?.refreshMemoryStats?.();
+}
+
 function cleanImagePrompt(value) {
   return String(value || '').trim().slice(0, 12000);
 }
@@ -187,6 +201,20 @@ async function handleApi(req, res, url) {
   }
   if (req.method === 'GET' && pathname === '/api/config') return json(res, 200, getPublicConfig());
   if (req.method === 'GET' && pathname === '/api/state') return json(res, 200, manager.get(roomId).room.snapshot());
+  if (req.method === 'GET' && pathname === '/api/memory/inspect') {
+    if (!memoryManager) return json(res, 503, { error: 'Agent memory đang bị tắt.' });
+    const agentId = requireConfiguredAgent(url.searchParams.get('agent'));
+    const query = String(url.searchParams.get('query') || '').slice(0, 12000);
+    const includeInactive = url.searchParams.get('includeInactive') === '1';
+    const memories = memoryManager.inspect(agentId, { roomId, query, includeInactive });
+    return json(res, 200, {
+      ok: true,
+      agentId,
+      agentName: configuredAgents[agentId]?.name || agentId,
+      query,
+      memories,
+    });
+  }
   if (req.method === 'POST' && pathname === '/api/rooms') {
     if (!serverConfig.multiRoomEnabled) {
       manager.get('default-room');
@@ -218,7 +246,21 @@ async function handleApi(req, res, url) {
 
   if (pathname === '/api/memory/forget-runs') {
     const forgotten = memoryManager?.forgetRuns(body.runIds) || 0;
-    for (const record of manager.rooms.values()) record.room?.refreshMemoryStats?.();
+    refreshAllMemoryStats();
+    return json(res, 200, { ok: true, forgotten });
+  }
+  if (pathname === '/api/memory/forget') {
+    if (!memoryManager) return json(res, 503, { error: 'Agent memory đang bị tắt.' });
+    const agentId = requireConfiguredAgent(body.agentId);
+    const forgotten = memoryManager.forgetMemory(agentId, body.memoryId, { roomId });
+    refreshAllMemoryStats();
+    return json(res, 200, { ok: true, forgotten });
+  }
+  if (pathname === '/api/memory/clear-agent') {
+    if (!memoryManager) return json(res, 503, { error: 'Agent memory đang bị tắt.' });
+    const agentId = requireConfiguredAgent(body.agentId);
+    const forgotten = memoryManager.deactivateAgentMemories(agentId, { roomId });
+    refreshAllMemoryStats();
     return json(res, 200, { ok: true, forgotten });
   }
 
