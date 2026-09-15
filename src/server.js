@@ -215,6 +215,13 @@ async function handleApi(req, res, url) {
 
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed.' });
   const body = await readJson(req);
+
+  if (pathname === '/api/memory/forget-runs') {
+    const forgotten = memoryManager?.forgetRuns(body.runIds) || 0;
+    for (const record of manager.rooms.values()) record.room?.refreshMemoryStats?.();
+    return json(res, 200, { ok: true, forgotten });
+  }
+
   const room = manager.get(roomId).room;
 
   if (pathname === '/api/start') return json(res, 200, await room.start(body));

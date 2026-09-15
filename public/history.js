@@ -21,6 +21,17 @@ function normalizedRunIds(values, limit = HISTORY_DELETED_LIMIT) {
   return unique;
 }
 
+function syncForgottenRuns(runIds) {
+  if (typeof window === 'undefined' || typeof window.fetch !== 'function') return;
+  const ids = normalizedRunIds(runIds);
+  if (!ids.length) return;
+  void window.fetch('/api/memory/forget-runs', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ runIds: ids }),
+  }).catch(() => {});
+}
+
 export function createHistoryRecord(snapshot, savedAt = new Date().toISOString()) {
   if (!snapshot?.runId || !snapshot?.topic || !Array.isArray(snapshot.history) || snapshot.history.length === 0) return null;
   return {
@@ -71,11 +82,16 @@ export function parseDeletedHistory(raw, limit = HISTORY_DELETED_LIMIT) {
 }
 
 export function addDeletedHistoryRunIds(existing, runIds, limit = HISTORY_DELETED_LIMIT) {
-  const next = Array.isArray(runIds) ? runIds : [runIds];
+  const next = normalizedRunIds(Array.isArray(runIds) ? runIds : [runIds], limit);
+  syncForgottenRuns(next);
   return normalizedRunIds([...next, ...(Array.isArray(existing) ? existing : [])], limit);
 }
 
 export function filterDeletedHistory(records, deletedRunIds = []) {
-  const deleted = new Set(normalizedRunIds(deletedRunIds));
+  const normalizedDeleted = normalizedRunIds(deletedRunIds);
+  // Reconcile tombstones created by older app versions with persistent backend memory.
+  // The endpoint is idempotent, so resending them at startup is safe.
+  syncForgottenRuns(normalizedDeleted);
+  const deleted = new Set(normalizedDeleted);
   return (Array.isArray(records) ? records : []).filter((item) => item?.runId && !deleted.has(item.runId));
 }
