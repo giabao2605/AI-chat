@@ -145,5 +145,6 @@ test('six-agent UI and markdown surfaces include E/F', async () => {
   assert.match(session, /'c', 'd', 'e', 'f'/);
   assert.match(extension, /\['e', 'f'\]/);
   assert.match(extension, /agent\$\{upper\}Total/);
-  assert.match(markdown, /'e', 'f'/);
+  assert.match(markdown, /\.message\.e \.bubble/);
+  assert.match(markdown, /\.message\.f \.bubble/);
 });
