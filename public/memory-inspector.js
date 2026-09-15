@@ -1,3 +1,56 @@
+function mountInspector() {
+  if (!document.querySelector('link[href="/memory-inspector.css"]')) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = '/memory-inspector.css';
+    document.head.append(link);
+  }
+
+  const historyBtn = document.getElementById('historyBtn');
+  if (historyBtn && !document.getElementById('memoryInspectorBtn')) {
+    const button = document.createElement('button');
+    button.id = 'memoryInspectorBtn';
+    button.className = 'button ghost compact-button';
+    button.type = 'button';
+    button.textContent = 'Memory';
+    historyBtn.insertAdjacentElement('afterend', button);
+  }
+
+  if (!document.getElementById('memoryInspectorDrawer')) {
+    document.body.insertAdjacentHTML('beforeend', `
+      <div id="memoryInspectorBackdrop" class="memory-inspector-backdrop hidden"></div>
+      <aside id="memoryInspectorDrawer" class="memory-inspector-drawer" aria-hidden="true">
+        <div class="memory-inspector-header">
+          <div>
+            <div class="eyebrow">MEMORY INSPECTOR</div>
+            <h2>Ký ức dài hạn</h2>
+            <p>Xem memory thực tế trong SQLite và preview memory nào sẽ được recall với một query cụ thể.</p>
+          </div>
+          <button id="closeMemoryInspectorBtn" class="icon-button" type="button" title="Đóng">×</button>
+        </div>
+        <div class="memory-inspector-toolbar">
+          <label><span>Agent</span><select id="memoryInspectorAgent"></select></label>
+          <label><span>Preview query</span><input id="memoryInspectorQuery" type="search" placeholder="Ví dụ: mày nhớ game Ma Sói lần trước không?" /></label>
+          <div class="memory-inspector-toolbar-row">
+            <label class="memory-inspector-check"><input id="memoryInspectorInactive" type="checkbox" /><span>Hiện memory inactive</span></label>
+            <div class="memory-inspector-actions">
+              <button id="memoryInspectorRefresh" class="button ghost" type="button">Làm mới</button>
+              <button id="memoryInspectorClearAgent" class="button danger" type="button">Quên toàn bộ agent</button>
+            </div>
+          </div>
+        </div>
+        <div class="memory-inspector-body">
+          <div id="memoryInspectorSummary" class="memory-inspector-summary">Chưa tải memory.</div>
+          <div id="memoryInspectorEmpty" class="memory-inspector-empty hidden">Agent này chưa có memory phù hợp với bộ lọc hiện tại.</div>
+          <div id="memoryInspectorList" class="memory-inspector-list"></div>
+        </div>
+      </aside>
+    `);
+  }
+}
+
+mountInspector();
+
 const $ = (id) => document.getElementById(id);
 
 const els = {
@@ -88,10 +141,13 @@ function populateAgents() {
 }
 
 function cardHtml(memory) {
-  const activation = memory.wouldRecall
-    ? '<span class="memory-badge recall">Sẽ recall</span>'
-    : '<span class="memory-badge muted">Không recall</span>';
+  const activation = memory.queryProvided
+    ? (memory.wouldRecall
+      ? '<span class="memory-badge recall">Sẽ recall</span>'
+      : '<span class="memory-badge muted">Không recall</span>')
+    : '<span class="memory-badge muted">Chưa preview</span>';
   const inactive = memory.active === false ? '<span class="memory-badge inactive">Inactive</span>' : '';
+  const forgotten = memory.runForgotten ? '<span class="memory-badge inactive">Run đã quên</span>' : '';
   const run = memory.runId ? `<span title="Run nguồn">run: ${escapeHtml(memory.runId)}</span>` : '<span>run: —</span>';
   const key = memory.key ? `<span title="Stable key">key: ${escapeHtml(memory.key)}</span>` : '';
   const relevanceRow = memory.queryProvided
@@ -105,6 +161,7 @@ function cardHtml(memory) {
           <span class="memory-badge type-${escapeHtml(memory.type)}">${escapeHtml(memoryTypeLabel(memory.type))}</span>
           ${activation}
           ${inactive}
+          ${forgotten}
         </div>
         ${memory.active === false ? '' : `<button class="memory-forget-button" type="button" data-forget-memory="${escapeHtml(memory.id)}">Quên</button>`}
       </div>
