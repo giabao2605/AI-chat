@@ -3,12 +3,14 @@ import './memory-inspector.js';
 import './private-context-inspector.js';
 import './header-toolbar-layout.js';
 import './reasoning-control.js';
+import './six-agent-ui.js';
 
 const ROOM_KEY = 'ai-chat-room-id-v2';
 const EXTRA_PERSONAS_KEY = 'ai-chat-extra-personas-v1';
 const HISTORY_KEY = 'ai-chat-history-v1';
 const DB_NAME = 'ai-chat-lab-v2';
 const DB_VERSION = 1;
+const OPTIONAL_AGENT_IDS = ['c', 'd', 'e', 'f'];
 
 function makeRoomId() {
   const raw = globalThis.crypto?.randomUUID?.().replace(/-/g, '') || `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -80,8 +82,13 @@ function augmentBody(input, init = {}) {
   try {
     const body = JSON.parse(init.body);
     const extra = readExtraPersonas();
-    body.personaC = document.getElementById('personaC')?.value ?? extra.c ?? '';
-    body.personaD = document.getElementById('personaD')?.value ?? extra.d ?? '';
+    body.personas = body.personas && typeof body.personas === 'object' ? { ...body.personas } : {};
+    for (const id of OPTIONAL_AGENT_IDS) {
+      const upper = id.toUpperCase();
+      const persona = document.getElementById(`persona${upper}`)?.value ?? extra[id] ?? '';
+      body[`persona${upper}`] = persona;
+      body.personas[id] = persona;
+    }
     body.agentProfiles = readAgentProfiles();
     return { ...init, body: JSON.stringify(body) };
   } catch {

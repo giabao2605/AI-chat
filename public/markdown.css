@@ -1,7 +1,9 @@
 .message.a .bubble.markdown,
 .message.b .bubble.markdown,
 .message.c .bubble.markdown,
-.message.d .bubble.markdown {
+.message.d .bubble.markdown,
+.message.e .bubble.markdown,
+.message.f .bubble.markdown {
   white-space: normal;
   line-height: 1.68;
   overflow-wrap: anywhere;
@@ -185,7 +187,9 @@
   .message.a .bubble.markdown,
   .message.b .bubble.markdown,
   .message.c .bubble.markdown,
-  .message.d .bubble.markdown {
+  .message.d .bubble.markdown,
+  .message.e .bubble.markdown,
+  .message.f .bubble.markdown {
     line-height: 1.62;
   }
 
