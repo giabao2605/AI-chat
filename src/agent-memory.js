@@ -37,10 +37,6 @@ const MEMORY_QUERY_STOPWORDS = new Set([
   'tiep', 'tuc',
 ]);
 
-const EXPLICIT_RECALL_CUES = new Set([
-  'nho', 'remember', 'recall', 'previous', 'earlier', 'truoc', 'cu', 'lan', 'hoi', 'hom',
-]);
-
 function memorySearchTokens(value) {
   return new Set(normalizeSearchText(value)
     .split(/\s+/)
@@ -48,18 +44,26 @@ function memorySearchTokens(value) {
     .slice(0, 160));
 }
 
+function explicitRecallRequested(value) {
+  const text = normalizeSearchText(value);
+  if (!text) return false;
+  return /\b(nho|remember|recall|previous|earlier)\b/.test(text)
+    || /\b(lan|hom|phien|cuoc)\s+(truoc|cu)\b/.test(text)
+    || /\btruoc\s+day\b/.test(text);
+}
+
 function memoryMatch(query, content) {
   const queryTokens = memorySearchTokens(query);
   const contentTokens = memorySearchTokens(content);
   if (!queryTokens.size || !contentTokens.size) {
-    return { relevance: 0, shared: 0, explicitRecall: false, queryTokens: queryTokens.size };
+    return { relevance: 0, shared: 0, explicitRecall: explicitRecallRequested(query), queryTokens: queryTokens.size };
   }
   let shared = 0;
   for (const token of queryTokens) if (contentTokens.has(token)) shared += 1;
   return {
     relevance: shared / Math.sqrt(queryTokens.size * contentTokens.size),
     shared,
-    explicitRecall: [...queryTokens].some((token) => EXPLICIT_RECALL_CUES.has(token)),
+    explicitRecall: explicitRecallRequested(query),
     queryTokens: queryTokens.size,
   };
 }
@@ -68,9 +72,9 @@ function activationRule(memory, match) {
   const type = String(memory?.type || '').toLowerCase();
   if (!match.queryTokens || !match.shared) return false;
   if (match.explicitRecall) return match.relevance >= 0.05;
-  if (type === 'semantic') return match.shared >= 1 && match.relevance >= 0.10;
-  if (type === 'relationship' || type === 'procedural') return match.shared >= 1 && match.relevance >= 0.12;
-  return match.shared >= 2 && match.relevance >= 0.16;
+  if (type === 'semantic') return match.shared >= 1 && match.relevance >= 0.20;
+  if (type === 'relationship' || type === 'procedural') return match.shared >= 1 && match.relevance >= 0.18;
+  return match.shared >= 2 && match.relevance >= 0.18;
 }
 
 function parseJsonPayload(text) {
@@ -363,8 +367,6 @@ export class AgentMemoryManager {
       onDelta: () => {},
     });
 
-    // A history deletion may arrive while the hidden consolidation call is in flight.
-    // Re-check before writing so a forgotten run cannot resurrect itself afterward.
     if (this.isRunForgotten(runId)) return { stored: [], usage: result?.usage || null, skipped: true };
 
     const parsed = parseJsonPayload(result?.text);
