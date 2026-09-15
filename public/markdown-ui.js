@@ -10,7 +10,7 @@ if (!document.querySelector('link[data-markdown-ui]')) {
 }
 
 const chat = document.getElementById('chat');
-const AI_BUBBLE_SELECTOR = '.message.a .bubble, .message.b .bubble, .message.c .bubble, .message.d .bubble';
+const AI_BUBBLE_SELECTOR = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => `.message.${id} .bubble`).join(', ');
 
 function rawTextSource(bubble) {
   if (!(bubble instanceof HTMLElement)) return null;
