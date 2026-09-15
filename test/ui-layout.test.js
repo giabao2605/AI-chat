@@ -7,21 +7,36 @@ const layout = await readFile(new URL('../public/layout-v2.css', import.meta.url
 const visual = await readFile(new URL('../public/ui-v3.css', import.meta.url), 'utf8');
 const sidebar = await readFile(new URL('../public/sidebar-v3.css', import.meta.url), 'utf8');
 const chatV4 = await readFile(new URL('../public/chat-v4.css', import.meta.url), 'utf8');
+const roomSession = await readFile(new URL('../public/room-session.js', import.meta.url), 'utf8');
+const headerToolbar = await readFile(new URL('../public/header-toolbar-layout.js', import.meta.url), 'utf8');
+const headerToolbarCss = await readFile(new URL('../public/header-toolbar-layout.css', import.meta.url), 'utf8');
 
-test('header branding is removed and status/history live inside Control Room', () => {
+test('header branding is removed and session controls remain singletons', () => {
   assert.doesNotMatch(index, /AI CONVERSATION LAB/);
   assert.doesNotMatch(index, /class="topbar"/);
 
-  const controlStart = index.indexOf('<aside id="controlPanel"');
-  const controlEnd = index.indexOf('</aside>', controlStart);
-  const controlMarkup = index.slice(controlStart, controlEnd);
+  assert.equal((index.match(/id="connectionText"/g) || []).length, 1);
+  assert.equal((index.match(/id="roomStatus"/g) || []).length, 1);
+  assert.equal((index.match(/id="historyBtn"/g) || []).length, 1);
+  assert.match(index, /id="agentATotal"/);
+  assert.match(index, /id="agentBTotal"/);
+  assert.match(index, /id="combinedTotal"/);
+});
 
-  assert.match(controlMarkup, /id="connectionText"/);
-  assert.match(controlMarkup, /id="roomStatus"/);
-  assert.match(controlMarkup, /id="historyBtn"/);
-  assert.match(controlMarkup, /id="agentATotal"/);
-  assert.match(controlMarkup, /id="agentBTotal"/);
-  assert.match(controlMarkup, /id="combinedTotal"/);
+test('realtime and history move to chat header while memory/private stay in sidebar tools', () => {
+  assert.match(roomSession, /import '\.\/header-toolbar-layout\.js';/);
+  assert.match(headerToolbar, /status\.classList\.add\('toolbar-session-status'\)/);
+  assert.match(headerToolbar, /toolbar\.append\(status\)/);
+  assert.match(headerToolbar, /history\.classList\.add\('toolbar-history-button'\)/);
+  assert.match(headerToolbar, /toolbar\.append\(history\)/);
+  assert.match(headerToolbar, /\['memoryInspectorBtn', 'privateContextInspectorBtn'\]/);
+  assert.match(headerToolbar, /actions\.append\(button\)/);
+  assert.match(headerToolbarCss, /\.toolbar-session-status\s*\{[^}]*order:\s*10/s);
+  assert.match(headerToolbarCss, /\.toolbar-history-button\s*\{[^}]*order:\s*20/s);
+  assert.match(headerToolbarCss, /#openLabInspector\s*\{[^}]*order:\s*30/s);
+  assert.match(headerToolbarCss, /#pauseBtn\s*\{[^}]*order:\s*40/s);
+  assert.match(headerToolbarCss, /#stopBtn\s*\{[^}]*order:\s*50/s);
+  assert.match(headerToolbarCss, /\.sidebar-tool-actions\s*\{[^}]*grid-template-columns:\s*repeat\(2,/s);
 });
 
 test('desktop workspace fills the viewport without a header row', () => {
