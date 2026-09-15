@@ -320,6 +320,69 @@ export class AgentMemoryManager {
     return Number(result?.changes || 0);
   }
 
+  inspect(agentId, {
+    roomId = 'default-room',
+    query = '',
+    includeInactive = false,
+    limit = 500,
+  } = {}) {
+    if (!this.enabled) return [];
+    const cleanQuery = cleanText(query, 12000);
+    const queryProvided = Boolean(cleanQuery);
+    const memories = this.list(agentId, {
+      roomId,
+      includeInactive,
+      limit: Math.max(1, Math.min(1000, Number(limit) || 500)),
+    });
+    return memories
+      .map((memory) => {
+        const match = queryProvided
+          ? memoryMatch(cleanQuery, `${memory.content} ${memory.key || ''}`)
+          : { relevance: 0, shared: 0, explicitRecall: false, queryTokens: 0 };
+        const runForgotten = this.isRunForgotten(memory.runId);
+        return {
+          ...memory,
+          queryProvided,
+          relevance: match.relevance,
+          sharedTokens: match.shared,
+          explicitRecall: match.explicitRecall,
+          runForgotten,
+          wouldRecall: Boolean(queryProvided && memory.active && !runForgotten && activationRule(memory, match)),
+        };
+      })
+      .sort((a, b) => {
+        if (queryProvided && a.wouldRecall !== b.wouldRecall) return a.wouldRecall ? -1 : 1;
+        if (a.active !== b.active) return a.active ? -1 : 1;
+        if (queryProvided && a.relevance !== b.relevance) return b.relevance - a.relevance;
+        return String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''));
+      });
+  }
+
+  forgetMemory(agentId, memoryId, { roomId = 'default-room' } = {}) {
+    if (!this.enabled || !this.store?.db?.prepare) return 0;
+    const cleanAgentId = cleanText(agentId, 80).toLowerCase();
+    const cleanMemoryId = cleanText(memoryId, 240);
+    const namespaces = this.namespaces(roomId);
+    if (!cleanAgentId || !cleanMemoryId || !namespaces.length) return 0;
+    const marks = namespaces.map(() => '?').join(', ');
+    const result = this.store.db.prepare(
+      `UPDATE agent_memories SET active = 0, updated_at = ? WHERE id = ? AND agent_id = ? AND namespace IN (${marks}) AND active = 1`,
+    ).run(new Date().toISOString(), cleanMemoryId, cleanAgentId, ...namespaces);
+    return Number(result?.changes || 0);
+  }
+
+  deactivateAgentMemories(agentId, { roomId = 'default-room' } = {}) {
+    if (!this.enabled || !this.store?.db?.prepare) return 0;
+    const cleanAgentId = cleanText(agentId, 80).toLowerCase();
+    const namespaces = this.namespaces(roomId);
+    if (!cleanAgentId || !namespaces.length) return 0;
+    const marks = namespaces.map(() => '?').join(', ');
+    const result = this.store.db.prepare(
+      `UPDATE agent_memories SET active = 0, updated_at = ? WHERE agent_id = ? AND namespace IN (${marks}) AND active = 1`,
+    ).run(new Date().toISOString(), cleanAgentId, ...namespaces);
+    return Number(result?.changes || 0);
+  }
+
   shouldConsolidate(newVisibleMessages, { force = false } = {}) {
     if (!this.enabled) return false;
     if (force) return newVisibleMessages > 0;
