@@ -3,6 +3,7 @@ import { resolveAgentDisplayName } from './model-name-utils.js';
 export const AGENT_PROFILE_STORAGE_KEY = 'ai-chat-agent-profiles-v1';
 
 const $ = (id) => document.getElementById(id);
+const DEFAULT_AGENT_SLOTS = ['a', 'b', 'c', 'd', 'e', 'f'];
 let cachedConfig = null;
 let syncQueued = false;
 
@@ -44,7 +45,7 @@ function legacyPrompt(saved = {}, legacyPersona = '') {
 
 export function readAgentProfiles() {
   const stored = storedProfiles();
-  const ids = cachedConfig?.agentSlots || ['a', 'b', 'c', 'd'];
+  const ids = cachedConfig?.agentSlots || DEFAULT_AGENT_SLOTS;
   const defaults = cachedConfig?.defaults || {};
   const result = {};
 
@@ -184,7 +185,7 @@ function profileCard(id, config, saved) {
 }
 
 function hideLegacyControls() {
-  for (const id of ['a', 'b', 'c', 'd']) {
+  for (const id of DEFAULT_AGENT_SLOTS) {
     const legacy = $(`persona${id.toUpperCase()}`);
     legacy?.closest('.field')?.classList.add('agent-profile-hidden');
   }
@@ -231,7 +232,7 @@ async function initAgentProfiles() {
   const heading = document.createElement('div');
   heading.innerHTML = '<strong>Agent Profiles</strong>';
   shell.append(heading);
-  for (const id of cachedConfig.agentSlots || ['a', 'b', 'c', 'd']) {
+  for (const id of cachedConfig.agentSlots || DEFAULT_AGENT_SLOTS) {
     const agent = cachedConfig.agents?.[id];
     if (!agent?.configured) continue;
     shell.append(profileCard(id, cachedConfig, saved[id] || {}));
