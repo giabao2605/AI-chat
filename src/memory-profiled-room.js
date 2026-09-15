@@ -31,6 +31,9 @@ export class MemoryProfiledRoom extends ProfiledRoom {
     this.memoryGeneration = 0;
     this.memoryCursors = Object.fromEntries(this.agentIds.map((id) => [id, 0]));
     this.memoryQueues = Object.fromEntries(this.agentIds.map((id) => [id, Promise.resolve()]));
+    this.memoryInFlight = Object.fromEntries(this.agentIds.map((id) => [id, false]));
+    this.memoryForceAfterFlight = Object.fromEntries(this.agentIds.map((id) => [id, false]));
+    this.memoryErrorFlushedRunId = '';
     this.memoryStatsCache = Object.fromEntries(this.agentIds.map((id) => [id, { total: 0, byType: {} }]));
     this.lastMemoryRetrieval = Object.fromEntries(this.agentIds.map((id) => [id, { count: 0, at: null }]));
     this.refreshMemoryStats();
@@ -44,6 +47,9 @@ export class MemoryProfiledRoom extends ProfiledRoom {
     this.memoryGeneration = Math.max(0, Number(this.memoryGeneration) || 0) + 1;
     this.memoryCursors = Object.fromEntries(this.agentIds.map((id) => [id, Math.max(0, Number(cursor) || 0)]));
     this.memoryQueues = Object.fromEntries(this.agentIds.map((id) => [id, Promise.resolve()]));
+    this.memoryInFlight = Object.fromEntries(this.agentIds.map((id) => [id, false]));
+    this.memoryForceAfterFlight = Object.fromEntries(this.agentIds.map((id) => [id, false]));
+    this.memoryErrorFlushedRunId = '';
     this.lastMemoryRetrieval = Object.fromEntries(this.agentIds.map((id) => [id, { count: 0, at: null }]));
     this.refreshMemoryStats();
   }
@@ -58,6 +64,18 @@ export class MemoryProfiledRoom extends ProfiledRoom {
         this.recordDebug?.('memory:stats-error', { agentId: id, message: error?.message || String(error) });
       }
     }
+  }
+
+  emitState() {
+    const shouldFlushError = this.status === 'error'
+      && this.memoryEnabled()
+      && this.memoryErrorFlushedRunId !== this.runId;
+    const result = super.emitState();
+    if (shouldFlushError) {
+      this.memoryErrorFlushedRunId = this.runId;
+      this.flushMemoryConsolidation();
+    }
+    return result;
   }
 
   reset() {
@@ -167,68 +185,83 @@ export class MemoryProfiledRoom extends ProfiledRoom {
   queueMemoryConsolidation(agentId, { force = false } = {}) {
     if (!this.memoryEnabled() || !this.agentIds.includes(agentId)) return null;
 
-    const start = Math.max(0, Number(this.memoryCursors[agentId]) || 0);
-    const end = this.history.length;
-    const count = Math.max(0, end - start);
-    if (!this.memoryManager.shouldConsolidate(count, { force })) return null;
-
-    const events = this.history.slice(start, end).map(memoryEventSnapshot);
-    if (!events.length) {
-      this.memoryCursors[agentId] = end;
-      return null;
+    if (this.memoryInFlight?.[agentId]) {
+      if (force) this.memoryForceAfterFlight[agentId] = true;
+      return this.memoryQueues[agentId] || null;
     }
 
     const provider = this.memoryProviders[agentId];
     if (!provider) return null;
 
-    // Reserve the range synchronously. The queued task uses only this immutable snapshot,
-    // so a reset/new session can never make old consolidation read the new room history.
-    this.memoryCursors[agentId] = end;
     const generation = this.memoryGeneration;
     const scheduledRunId = this.runId;
-    const scheduledTopic = this.topic;
-    const scheduledPersona = this.settings?.personas?.[agentId] || '';
-    const previous = this.memoryQueues[agentId] || Promise.resolve();
+    const pendingForce = Boolean(this.memoryForceAfterFlight[agentId]);
+    this.memoryInFlight[agentId] = true;
+    this.memoryForceAfterFlight[agentId] = pendingForce || Boolean(force);
 
-    const task = previous.then(async () => {
-      let result = null;
-      let lastError = null;
-      for (let attempt = 1; attempt <= 2; attempt += 1) {
-        try {
-          result = await this.memoryManager.consolidate({
-            agentId,
-            agentName: this.agentConfigs[agentId]?.name || agentId,
-            persona: scheduledPersona,
-            provider,
-            events,
-            roomId: this.roomId,
-            runId: scheduledRunId,
-            topic: scheduledTopic,
-          });
-          lastError = null;
+    const task = (async () => {
+      let requestedForce = pendingForce || Boolean(force);
+
+      while (this.memoryGeneration === generation && this.runId === scheduledRunId) {
+        const start = Math.max(0, Number(this.memoryCursors[agentId]) || 0);
+        const end = this.history.length;
+        const count = Math.max(0, end - start);
+        const forceThisPass = requestedForce || Boolean(this.memoryForceAfterFlight[agentId]);
+        this.memoryForceAfterFlight[agentId] = false;
+        requestedForce = false;
+
+        if (!this.memoryManager.shouldConsolidate(count, { force: forceThisPass })) break;
+
+        const events = this.history.slice(start, end).map(memoryEventSnapshot);
+        if (!events.length) {
+          this.memoryCursors[agentId] = end;
           break;
-        } catch (error) {
-          lastError = error;
         }
-      }
 
-      const stillCurrent = this.memoryGeneration === generation && this.runId === scheduledRunId;
-      if (lastError) {
-        if (stillCurrent) {
-          this.recordDebug('memory:consolidation-error', {
-            agentId,
-            runId: scheduledRunId,
-            fromIndex: start,
-            toIndex: end,
-            message: lastError?.message || String(lastError),
-          });
+        const scheduledTopic = this.topic;
+        const scheduledPersona = this.settings?.personas?.[agentId] || '';
+        let result = null;
+        let lastError = null;
+
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          try {
+            result = await this.memoryManager.consolidate({
+              agentId,
+              agentName: this.agentConfigs[agentId]?.name || agentId,
+              persona: scheduledPersona,
+              provider,
+              events,
+              roomId: this.roomId,
+              runId: scheduledRunId,
+              topic: scheduledTopic,
+            });
+            lastError = null;
+            break;
+          } catch (error) {
+            lastError = error;
+          }
         }
-        return;
-      }
 
-      if (result?.usage && stillCurrent) this.addUsage(agentId, result.usage, false);
-      this.refreshMemoryStats(agentId);
-      if (stillCurrent) {
+        const stillCurrent = this.memoryGeneration === generation && this.runId === scheduledRunId;
+        if (lastError) {
+          if (stillCurrent) {
+            this.recordDebug('memory:consolidation-error', {
+              agentId,
+              runId: scheduledRunId,
+              fromIndex: start,
+              toIndex: end,
+              message: lastError?.message || String(lastError),
+            });
+          }
+          break;
+        }
+
+        if (!stillCurrent) break;
+
+        // The cursor marks successfully consolidated history only. Failed batches remain retryable.
+        this.memoryCursors[agentId] = end;
+        if (result?.usage) this.addUsage(agentId, result.usage, false);
+        this.refreshMemoryStats(agentId);
         this.recordDebug('memory:consolidated', {
           agentId,
           runId: scheduledRunId,
@@ -237,10 +270,18 @@ export class MemoryProfiledRoom extends ProfiledRoom {
           eventCount: events.length,
           stored: result?.stored?.length || 0,
         });
-      }
-    });
 
-    this.memoryQueues[agentId] = task.catch(() => {});
+        requestedForce = Boolean(this.memoryForceAfterFlight[agentId]);
+        this.memoryForceAfterFlight[agentId] = false;
+      }
+    })();
+
+    this.memoryQueues[agentId] = task
+      .catch(() => {})
+      .finally(() => {
+        if (this.memoryGeneration !== generation || this.runId !== scheduledRunId) return;
+        this.memoryInFlight[agentId] = false;
+      });
     return this.memoryQueues[agentId];
   }
 
