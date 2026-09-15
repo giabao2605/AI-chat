@@ -1,12 +1,51 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { IMAGE_GENERATION_TOOL } from '../src/agent-tools.js';
+import { IMAGE_GENERATION_TOOL, PRIVATE_CONTEXT_TOOL, PRIVATE_CONTEXT_TOOL_NAME } from '../src/agent-tools.js';
 import { OpenAICompatibleProvider } from '../src/provider.js';
 
 function sseToolCall() {
   const chunks = [
     { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'generate_image', arguments: '{"prompt":"hồ ' } }] } }] },
     { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: 'nước"}' } }] } }] },
+  ];
+  return new Response(`${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join('')}data: [DONE]\n\n`, {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+  });
+}
+
+function sseMultiplePrivateToolCalls() {
+  const chunks = [
+    {
+      choices: [{
+        delta: {
+          tool_calls: [
+            {
+              index: 0,
+              id: 'private_b',
+              type: 'function',
+              function: { name: PRIVATE_CONTEXT_TOOL_NAME, arguments: '{"recipient":"b","content":"ONE' },
+            },
+            {
+              index: 1,
+              id: 'private_c',
+              type: 'function',
+              function: { name: PRIVATE_CONTEXT_TOOL_NAME, arguments: '{"recipient":"c","content":"TWO' },
+            },
+          ],
+        },
+      }],
+    },
+    {
+      choices: [{
+        delta: {
+          tool_calls: [
+            { index: 0, function: { arguments: '"}' } },
+            { index: 1, function: { arguments: '"}' } },
+          ],
+        },
+      }],
+    },
   ];
   return new Response(`${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join('')}data: [DONE]\n\n`, {
     status: 200,
@@ -42,6 +81,31 @@ test('provider sends tool definitions and reconstructs streamed tool-call argume
     assert.equal(result.toolCalls[0].function.name, 'generate_image');
     assert.equal(result.toolCalls[0].function.arguments, '{"prompt":"hồ nước"}');
     assert.equal(result.toolsAccepted, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('provider reconstructs multiple parallel private-context tool calls by stream index', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => sseMultiplePrivateToolCalls();
+
+  try {
+    const provider = new OpenAICompatibleProvider({ baseUrl: 'https://provider.test/v1', apiKey: 'secret', model: 'm' });
+    const result = await provider.streamChat({
+      messages: [{ role: 'user', content: 'Gửi riêng cho B và C' }],
+      tools: [PRIVATE_CONTEXT_TOOL],
+    });
+
+    assert.equal(result.toolCalls.length, 2);
+    assert.deepEqual(result.toolCalls.map((call) => ({
+      id: call.id,
+      name: call.function.name,
+      args: JSON.parse(call.function.arguments),
+    })), [
+      { id: 'private_b', name: PRIVATE_CONTEXT_TOOL_NAME, args: { recipient: 'b', content: 'ONE' } },
+      { id: 'private_c', name: PRIVATE_CONTEXT_TOOL_NAME, args: { recipient: 'c', content: 'TWO' } },
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
   }
