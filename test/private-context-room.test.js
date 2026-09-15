@@ -118,13 +118,111 @@ test('secret sent from one agent is visible only to sender and recipient model p
   assert.equal(snapshot.privateContexts[0].content, secret);
 });
 
-test('private delivery creates a parallel trigger only for the recipient', () => {
-  const room = new ProfiledRoom({ agents, providerFactory: () => ({ streamChat: async () => ({ text: 'ok', usage: usage() }) }) });
+test('one agent can fan out private context to multiple recipients in the same provider response', async () => {
+  const room = new ProfiledRoom({
+    agents,
+    providerFactory: () => ({ streamChat: async () => ({ text: 'unused', usage: usage(), toolCalls: [] }) }),
+  });
+  const secretB = 'FANOUT-ONLY-B-314';
+  const secretC = 'FANOUT-ONLY-C-271';
+  let providerCalls = 0;
+
+  const result = await room.streamChatWithPrivateContext('a', async () => {
+    providerCalls += 1;
+    if (providerCalls === 1) {
+      return {
+        text: '',
+        usage: usage(),
+        toolCalls: [
+          {
+            id: 'fanout_b',
+            type: 'function',
+            function: {
+              name: PRIVATE_CONTEXT_TOOL_NAME,
+              arguments: JSON.stringify({ recipient: 'b', content: secretB }),
+            },
+          },
+          {
+            id: 'fanout_c',
+            type: 'function',
+            function: {
+              name: PRIVATE_CONTEXT_TOOL_NAME,
+              arguments: JSON.stringify({ recipient: 'c', content: secretC }),
+            },
+          },
+        ],
+      };
+    }
+    return { text: 'public after fan-out', usage: usage(), toolCalls: [] };
+  }, {
+    messages: [{ role: 'user', content: 'send privately' }],
+  });
+
+  assert.equal(providerCalls, 2, 'both deliveries happen before the model resumes its public reply');
+  assert.equal(result.text, 'public after fan-out');
+  assert.equal(room.privateContexts.length, 2);
+  assert.deepEqual(
+    room.privateContexts.map((entry) => [entry.senderId, entry.recipientId, entry.content]),
+    [['a', 'b', secretB], ['a', 'c', secretC]],
+  );
+
+  const senderBlock = room.privateContextSystemBlock('a');
+  const bBlock = room.privateContextSystemBlock('b');
+  const cBlock = room.privateContextSystemBlock('c');
+  assert.match(senderBlock, new RegExp(secretB));
+  assert.match(senderBlock, new RegExp(secretC));
+  assert.match(bBlock, new RegExp(secretB));
+  assert.doesNotMatch(bBlock, new RegExp(secretC));
+  assert.match(cBlock, new RegExp(secretC));
+  assert.doesNotMatch(cBlock, new RegExp(secretB));
+
+  assert.equal(room.privateInboxVersion.b, 1);
+  assert.equal(room.privateInboxVersion.c, 1);
+  assert.equal(result.diagnostics.privateContextCalls, 2);
+});
+
+test('multiple senders can privately converge on one recipient without leaking across senders', () => {
+  const room = new ProfiledRoom({
+    agents,
+    providerFactory: () => ({ streamChat: async () => ({ text: 'ok', usage: usage(), toolCalls: [] }) }),
+  });
+  room.settings = { conversationMode: 'parallel' };
+  room.status = 'paused';
+
+  room.recordPrivateContext('a', 'c', 'FROM-A-TO-C-111');
+  room.recordPrivateContext('b', 'c', 'FROM-B-TO-C-222');
+
+  assert.equal(room.privateInboxVersion.c, 2);
+  assert.equal(room.hasUnseenParallelTrigger('c'), true);
+
+  const cBlock = room.privateContextSystemBlock('c');
+  const aBlock = room.privateContextSystemBlock('a');
+  const bBlock = room.privateContextSystemBlock('b');
+  assert.match(cBlock, /FROM-A-TO-C-111/);
+  assert.match(cBlock, /FROM-B-TO-C-222/);
+  assert.match(aBlock, /FROM-A-TO-C-111/);
+  assert.doesNotMatch(aBlock, /FROM-B-TO-C-222/);
+  assert.match(bBlock, /FROM-B-TO-C-222/);
+  assert.doesNotMatch(bBlock, /FROM-A-TO-C-111/);
+
+  const snapshot = room.snapshot();
+  assert.equal(snapshot.privateContextStats.byAgent.c.received, 2);
+  assert.equal(snapshot.privateContextStats.byAgent.a.sent, 1);
+  assert.equal(snapshot.privateContextStats.byAgent.b.sent, 1);
+});
+
+test('private fan-out creates parallel triggers for every recipient and nobody else', () => {
+  const room = new ProfiledRoom({
+    agents,
+    providerFactory: () => ({ streamChat: async () => ({ text: 'ok', usage: usage(), toolCalls: [] }) }),
+  });
   room.settings = { conversationMode: 'parallel' };
   room.status = 'paused';
 
   room.recordPrivateContext('a', 'b', 'BLUE-428');
+  room.recordPrivateContext('a', 'c', 'GREEN-529');
 
   assert.equal(room.hasUnseenParallelTrigger('b'), true);
-  assert.equal(room.hasUnseenParallelTrigger('c'), false);
+  assert.equal(room.hasUnseenParallelTrigger('c'), true);
+  assert.equal(room.hasUnseenParallelTrigger('a'), false);
 });
