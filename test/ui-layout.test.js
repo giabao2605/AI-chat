@@ -31,6 +31,8 @@ test('realtime and history move to chat header while memory/private stay in side
   assert.match(headerToolbar, /toolbar\.append\(history\)/);
   assert.match(headerToolbar, /\['memoryInspectorBtn', 'privateContextInspectorBtn'\]/);
   assert.match(headerToolbar, /actions\.append\(button\)/);
+  assert.match(headerToolbar, /function removeEmptyStatusLine\(\)[\s\S]*statusLine\.remove\(\)/);
+  assert.match(headerToolbar, /function keepDebugToolsInSidebar\(\)[\s\S]*actions\.append\(button\)[\s\S]*removeEmptyStatusLine\(\)/);
   assert.match(headerToolbarCss, /\.toolbar-session-status\s*\{[^}]*order:\s*10/s);
   assert.match(headerToolbarCss, /\.toolbar-history-button\s*\{[^}]*order:\s*20/s);
   assert.match(headerToolbarCss, /#openLabInspector\s*\{[^}]*order:\s*30/s);

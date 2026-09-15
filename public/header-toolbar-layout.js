@@ -22,6 +22,11 @@ function ensureSidebarToolActions() {
   return actions;
 }
 
+function removeEmptyStatusLine() {
+  const statusLine = document.querySelector('.control-status-line');
+  if (statusLine && statusLine.children.length === 0) statusLine.remove();
+}
+
 function moveSessionControlsToHeader() {
   const toolbar = document.querySelector('.toolbar-actions');
   if (!toolbar) return;
@@ -40,7 +45,7 @@ function moveSessionControlsToHeader() {
     toolbar.append(history);
   }
 
-  if (statusLine && statusLine.children.length === 0) statusLine.remove();
+  removeEmptyStatusLine();
 }
 
 function keepDebugToolsInSidebar() {
@@ -50,6 +55,9 @@ function keepDebugToolsInSidebar() {
     const button = document.getElementById(id);
     if (button) actions.append(button);
   }
+  // Memory/Private are initially injected beside History. Once they move into
+  // the dedicated sidebar tools row, the old status line can become empty.
+  removeEmptyStatusLine();
 }
 
 ensureToolbarLayoutStyles();
