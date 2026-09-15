@@ -20,6 +20,21 @@ function tailText(value, maxLength) {
   return text.length > maxLength ? text.slice(-maxLength) : text;
 }
 
+function boundedProvisionalSummary(previousSummary, transcript, maxChars) {
+  const limit = Math.max(200, Number(maxChars) || 6500);
+  const previous = String(previousSummary || '').trim();
+  const recent = String(transcript || '').trim();
+  if (!previous) return tailText(`<recent_context_digest>\n${recent}\n</recent_context_digest>`, limit);
+  if (!recent) return tailText(previous, limit);
+
+  const wrapperChars = 48;
+  const usable = Math.max(120, limit - wrapperChars);
+  const previousBudget = Math.max(60, Math.floor(usable * 0.55));
+  const recentBudget = Math.max(60, usable - previousBudget);
+  return `${tailText(previous, previousBudget)}\n\n<recent_context_digest>\n${tailText(recent, recentBudget)}\n</recent_context_digest>`
+    .slice(-limit);
+}
+
 function mergeUsage(total, usage) {
   if (!usage) return total;
   if (!total) {
@@ -95,7 +110,7 @@ export class ProfiledRoom extends ParallelBatchRoom {
     this.profileTurnActive = new Set();
     this.profileOverrideSuppressed = new Set();
     this.maxPrivateMessagesPerTurn = Math.floor(clamp(options.maxPrivateMessagesPerTurn, 1, 20, 8));
-    this.maxPrivateToolRoundsPerTurn = Math.floor(clamp(options.maxPrivateToolRoundsPerTurn, 1, 4, 2));
+    this.maxPrivateToolRoundsPerTurn = Math.floor(clamp(options.maxPrivateToolRoundsPerTurn, 1, 3, 1));
     this.maxPrivateContextChars = Math.floor(clamp(options.maxPrivateContextChars, 1000, 100000, 16000));
     this.privateContexts = Array.isArray(this.privateContexts) ? this.privateContexts : [];
     this.privateInboxVersion = this.privateInboxVersion || Object.fromEntries(this.agentIds.map((id) => [id, 0]));
@@ -117,7 +132,9 @@ export class ProfiledRoom extends ParallelBatchRoom {
 
   reset() {
     this.resetPrivateContextState([]);
-    return super.reset();
+    const result = super.reset();
+    if (Object.prototype.hasOwnProperty.call(this, 'summaryRefreshPromise')) this.summaryRefreshPromise = null;
+    return result;
   }
 
   normalizeProfiles(input = {}) {
@@ -157,11 +174,13 @@ export class ProfiledRoom extends ParallelBatchRoom {
 
   async start(input = {}) {
     this.resetPrivateContextState([]);
+    this.summaryRefreshPromise = null;
     return super.start(this.prepareProfileInput(input));
   }
 
   async continueFromHistory(input = {}) {
     this.resetPrivateContextState(input?.session?.privateContexts || []);
+    this.summaryRefreshPromise = null;
     return super.continueFromHistory(this.prepareProfileInput(input));
   }
 
@@ -189,7 +208,7 @@ export class ProfiledRoom extends ParallelBatchRoom {
       ...PRIVATE_CONTEXT_TOOL,
       function: {
         ...PRIVATE_CONTEXT_TOOL.function,
-        description: `${PRIVATE_CONTEXT_TOOL.function.description} Agent đích hợp lệ hiện tại: ${labels}. Ưu tiên gom các recipient độc lập thành nhiều tool calls trong cùng một response thay vì gửi tuần tự qua nhiều vòng.`,
+        description: `${PRIVATE_CONTEXT_TOOL.function.description} Agent đích hợp lệ hiện tại: ${labels}. Chỉ dùng private context khi thông tin kín thực sự giúp agent khác phối hợp, quyết định hoặc hành động tốt hơn; đây không phải bước mặc định trước mọi câu trả lời. Nếu cần nhiều recipient, gom thành nhiều tool calls trong cùng một response thay vì gửi tuần tự qua nhiều vòng.`,
         parameters: {
           ...PRIVATE_CONTEXT_TOOL.function.parameters,
           properties: {
@@ -229,6 +248,12 @@ export class ProfiledRoom extends ParallelBatchRoom {
     selected.reverse();
 
     return `<private_agent_context>\n${selected.join('\n')}\n</private_agent_context>`;
+  }
+
+  // Backward-compatible name used by tests/debug code. The payload is now dynamic data,
+  // not a system instruction, but visibility/isolation semantics are unchanged.
+  privateContextSystemBlock(agentId) {
+    return this.privateContextDataBlock(agentId);
   }
 
   recordPrivateContext(senderId, recipientId, content) {
@@ -444,11 +469,10 @@ export class ProfiledRoom extends ParallelBatchRoom {
       return { used: false, background: false, ms: 0, covered: cutoff };
     }
 
-    // Do not put a hidden model call on the user's critical path. Preserve correctness
-    // immediately with a bounded raw digest, then replace it with a better model summary
-    // in the background (stale-while-revalidate).
-    const provisional = `${previousSummary ? `${previousSummary}\n\n` : ''}<recent_context_digest>\n${transcript}\n</recent_context_digest>`;
-    this.contextSummary = tailText(provisional, this.contextConfig.maxSummaryChars);
+    // Keep the current turn lossless enough without putting a hidden model call on its
+    // critical path. Preserve both the prior compact summary and recent uncovered data,
+    // then replace this provisional digest with a better model summary in the background.
+    this.contextSummary = boundedProvisionalSummary(previousSummary, transcript, this.contextConfig.maxSummaryChars);
     this.summaryCoveredIndex = cutoff;
     this.recordDebug('context:summary-provisional', {
       agentId,
@@ -501,7 +525,8 @@ export class ProfiledRoom extends ParallelBatchRoom {
       });
     });
 
-    this.summaryRefreshPromise = refresh
+    let trackedPromise;
+    trackedPromise = refresh
       .catch((error) => {
         if (error?.name === 'AbortError' || signal?.aborted || scheduledRunId !== this.runId) return;
         this.recordDebug('context:summary-error', {
@@ -512,8 +537,9 @@ export class ProfiledRoom extends ParallelBatchRoom {
         });
       })
       .finally(() => {
-        if (this.summaryRefreshPromise) this.summaryRefreshPromise = null;
+        if (this.summaryRefreshPromise === trackedPromise) this.summaryRefreshPromise = null;
       });
+    this.summaryRefreshPromise = trackedPromise;
 
     return { used: false, background: true, queued: true, ms: 0, covered: cutoff };
   }
