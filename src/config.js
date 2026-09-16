@@ -96,12 +96,26 @@ export function getDeepResearchConfig() {
 }
 
 export function getContextConfig() {
+  const budgetSafetyMarginRaw = Number(process.env.CONTEXT_BUDGET_SAFETY_MARGIN || 0.12);
+  const budgetSafetyMargin = Number.isFinite(budgetSafetyMarginRaw)
+    ? Math.max(0, Math.min(0.5, budgetSafetyMarginRaw))
+    : 0.12;
+  const agentBudgets = Object.fromEntries(AGENT_IDS.map((id) => {
+    const value = Math.max(0, intFromEnv(`${agentPrefix(id)}_CONTEXT_BUDGET_TOKENS`, 0));
+    return [id, value];
+  }).filter(([, value]) => value > 0));
+
   return {
     recentMessages: Math.max(6, Math.min(60, intFromEnv('CONTEXT_RECENT_MESSAGES', 18))),
     summarizeAfter: Math.max(12, Math.min(200, intFromEnv('CONTEXT_SUMMARIZE_AFTER', 28))),
     summaryChunk: Math.max(6, Math.min(100, intFromEnv('CONTEXT_SUMMARY_CHUNK', 16))),
     maxSummaryChars: Math.max(1500, Math.min(20000, intFromEnv('CONTEXT_SUMMARY_MAX_CHARS', 6500))),
     loopThreshold: Math.max(0.4, Math.min(0.98, Number(process.env.LOOP_SIMILARITY_THRESHOLD || 0.74))),
+    inputBudgetTokens: Math.max(0, intFromEnv('CONTEXT_INPUT_BUDGET_TOKENS', 12000)),
+    budgetSafetyMargin,
+    imageTokenReserve: Math.max(0, intFromEnv('CONTEXT_IMAGE_TOKEN_RESERVE', 1500)),
+    minRecentMessages: Math.max(1, Math.min(12, intFromEnv('CONTEXT_MIN_RECENT_MESSAGES', 4))),
+    agentBudgets,
   };
 }
 
@@ -222,6 +236,9 @@ export function getPublicConfig() {
     context: {
       recentMessages: context.recentMessages,
       summarizeAfter: context.summarizeAfter,
+      inputBudgetTokens: context.inputBudgetTokens,
+      budgetSafetyMargin: context.budgetSafetyMargin,
+      minRecentMessages: context.minRecentMessages,
     },
     memory: {
       enabled: memory.enabled,
