@@ -1,8 +1,12 @@
+import { randomUUID } from 'node:crypto';
+import { AgentExecutor } from './agent-executor.js';
 import { MemoryProfiledRoom } from './memory-profiled-room.js';
+import { detectConversationLoop } from './multi-agent-room.js';
 import { finalizeProviderInputProfile, profileProviderInput } from './request-metrics.js';
 
 const REASONING_MODES = new Set(['auto', 'low', 'medium', 'high', 'xhigh', 'max']);
 const MANUAL_REASONING_MODES = ['low', 'medium', 'high', 'xhigh', 'max'];
+const TERMINAL_STATUSES = new Set(['stopped', 'idle', 'error', 'completed']);
 
 function normalizeReasoningMode(value, fallback = 'auto') {
   const mode = String(value || '').trim().toLowerCase();
@@ -37,6 +41,7 @@ function unsupportedReasoningError(mode, details = '') {
 export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
   constructor(options = {}) {
     super(options);
+    this.agentExecutor = new AgentExecutor();
     this.reasoningMode = 'auto';
     this.reasoningProbeCache = new Map();
     const contextConfig = options.contextConfig && typeof options.contextConfig === 'object' ? options.contextConfig : {};
@@ -97,6 +102,99 @@ export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
       };
       return provider;
     };
+  }
+
+  async runAgentTurn(agentId, activeRunId = this.runId, controller = new AbortController()) {
+    const agent = this.agentConfigs[agentId];
+    const messageId = randomUUID();
+    const startedAt = Date.now();
+    const historySnapshot = this.history.slice();
+    const summaryDebug = await this.maybeRefreshSummary(agentId, historySnapshot, controller.signal);
+    const recentStart = Math.max(this.summaryCoveredIndex, historySnapshot.length - this.contextConfig.recentMessages);
+    const recentRaw = historySnapshot.slice(recentStart);
+    const recentHistory = await this.historyForModel(recentRaw);
+    const loopGuard = detectConversationLoop(historySnapshot, this.contextConfig.loopThreshold, this.agentIds);
+    const messages = this.contextAssembler.buildAgentMessages({
+      agentId,
+      agentName: agent.name,
+      participants: this.agentIds.map((id) => this.agentConfigs[id]),
+      topic: this.topic,
+      recentHistory,
+      sharedPrompt: this.settings.sharedPrompt,
+      personaPrompt: this.settings.personas[agentId],
+      summary: this.contextSummary,
+      loopGuard,
+      imageToolAvailable: this.imageToolAvailable(),
+      conversationMode: this.settings.conversationMode,
+    });
+
+    let research = { sources: [], debug: { searched: false, ms: 0 } };
+    try {
+      research = await this.addWebResearch(agentId, messages, controller.signal, historySnapshot);
+    } catch (error) {
+      if (error?.name === 'AbortError' || activeRunId !== this.runId) return null;
+      throw error;
+    }
+    if (activeRunId !== this.runId || TERMINAL_STATUSES.has(this.status)) return null;
+
+    const execution = await this.agentExecutor.execute({
+      agentId,
+      agentName: agent.name,
+      messageId,
+      provider: this.providers[agentId],
+      messages,
+      temperature: this.settings.temperature,
+      maxOutputTokens: this.settings.maxOutputTokens,
+      signal: controller.signal,
+      isActive: () => activeRunId === this.runId && !TERMINAL_STATUSES.has(this.status),
+      emit: (eventName, payload) => this.emit(eventName, payload),
+      imageTool: this.imageToolAvailable() ? this.imageTool : null,
+      maxImageCalls: this.maxImageToolCallsPerTurn,
+      recordImageToolEntry: ({ prompt, attachment, errorMessage }) => this.addImageToolHistoryEntry(agentId, prompt, attachment, errorMessage),
+      appendImageToolEntry: (targetMessages, entry) => this.appendToolEntryToMessages(targetMessages, entry, agentId),
+      onVisionFallback: () => {
+        if (this.visionFallbackWarned[agentId]) return;
+        this.visionFallbackWarned[agentId] = true;
+        this.emit('meta', { text: `${agent.name}: provider không nhận image input; đã fallback sang text.` });
+      },
+      onToolFallback: () => {
+        if (this.toolFallbackWarned[agentId]) return;
+        this.toolFallbackWarned[agentId] = true;
+        this.emit('meta', { text: `${agent.name}: provider không nhận native tool calling; tool tạo ảnh tự động bị bỏ qua.` });
+      },
+    });
+    if (!execution || activeRunId !== this.runId || TERMINAL_STATUSES.has(this.status)) return null;
+
+    const finishedAt = Date.now();
+    const debug = {
+      totalMs: finishedAt - startedAt,
+      firstTokenMs: execution.firstTokenAt ? execution.firstTokenAt - startedAt : null,
+      summary: summaryDebug,
+      context: {
+        historyTotal: historySnapshot.length,
+        recentMessages: recentHistory.length,
+        summaryChars: this.contextSummary.length,
+      },
+      loopGuard,
+      research: research.debug,
+      tools: { imageCalls: execution.imageCallsUsed },
+      providerCalls: execution.providerDiagnostics,
+    };
+    const entry = {
+      id: messageId,
+      speaker: agentId,
+      name: agent.name,
+      text: execution.text,
+      createdAt: new Date().toISOString(),
+      usage: execution.usage,
+      sources: research.sources,
+      debug,
+    };
+    this.history.push(entry);
+    this.addUsage(agentId, entry.usage, true);
+    this.recordDebug('turn:done', { agentId, messageId, ...debug });
+    this.emit('message:done', entry);
+    return { entry };
   }
 
   reasoningStatusForConfig(config, mode) {

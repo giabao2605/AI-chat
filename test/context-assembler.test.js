@@ -9,6 +9,39 @@ const baseMessages = [
   { role: 'user', content: 'latest trigger' },
 ];
 
+test('active turn base assembly preserves identity, summary, steering and speaker role mapping', () => {
+  const assembler = new ContextAssembler();
+  const messages = assembler.buildAgentMessages({
+    agentId: 'a',
+    agentName: 'Alpha',
+    participants: [{ id: 'a', name: 'Alpha' }, { id: 'b', name: 'Beta' }],
+    topic: 'test topic',
+    recentHistory: [
+      { speaker: 'a', name: 'Alpha', text: 'my old reply' },
+      { speaker: 'b', name: 'Beta', text: 'their reply' },
+    ],
+    sharedPrompt: 'shared rules',
+    personaPrompt: 'persona rules',
+    summary: 'old summary',
+    loopGuard: true,
+    imageToolAvailable: true,
+    conversationMode: 'parallel',
+  });
+
+  assert.equal(messages[0].role, 'system');
+  assert.match(messages[0].content, /shared rules/);
+  assert.match(messages[0].content, /Alpha \(A\), Beta \(B\)/);
+  assert.match(messages[0].content, /generate_image/);
+  assert.match(messages[0].content, /song song/);
+  assert.match(messages[0].content, /persona rules/);
+  assert.match(messages[2].content, /conversation_summary/);
+  assert.match(messages[3].content, /conversation_steering/);
+  assert.equal(messages.at(-2).role, 'assistant');
+  assert.equal(messages.at(-2).content, 'my old reply');
+  assert.equal(messages.at(-1).role, 'user');
+  assert.equal(messages.at(-1).content, 'Beta: their reply');
+});
+
 test('memory context is inserted after system messages without mutating the input', () => {
   const assembler = new ContextAssembler();
   const next = assembler.addMemoryContext(baseMessages, '<agent_memory>memory</agent_memory>');
