@@ -1,15 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildMessagesForAgent } from '../src/orchestrator.js';
+import { ContextAssembler } from '../src/context-assembler.js';
 
-test('generated image attachment becomes multimodal user content for both agents', () => {
-  const messages = buildMessagesForAgent({
+test('generated image attachment becomes multimodal user content for another agent', () => {
+  const assembler = new ContextAssembler();
+  const messages = assembler.buildAgentMessages({
     agentId: 'a',
     agentName: 'Alpha',
+    participants: [{ id: 'a', name: 'Alpha' }, { id: 'b', name: 'Beta' }],
     topic: 'Ảnh hồ nước',
     sharedPrompt: 'Rules',
-    personaPrompt: '',
-    history: [{
+    recentHistory: [{
       speaker: 'tool',
       name: 'Image Generator',
       text: 'Đã tạo ảnh hồ nước',
