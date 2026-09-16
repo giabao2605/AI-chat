@@ -1,4 +1,4 @@
-function textFromContent(content) {
+export function textFromContent(content) {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return String(content ?? '');
   return content.map((part) => {
@@ -14,7 +14,7 @@ export function estimateTokens(text) {
   return chars === 0 ? 0 : Math.max(1, Math.ceil(chars / 4));
 }
 
-function categoryForMessage(message) {
+export function classifyProviderMessage(message) {
   const text = textFromContent(message?.content);
   if (message?.role === 'system') return 'systemAndPersona';
   if (text.includes('<agent_memory>')) return 'memory';
@@ -26,7 +26,7 @@ function categoryForMessage(message) {
   return 'recentHistory';
 }
 
-function imageCount(content) {
+export function countImageParts(content) {
   if (!Array.isArray(content)) return 0;
   return content.filter((part) => part?.type === 'image_url').length;
 }
@@ -47,10 +47,10 @@ export function profileProviderInput(messages = [], tools = []) {
   let messageCount = 0;
 
   for (const message of Array.isArray(messages) ? messages : []) {
-    const category = categoryForMessage(message);
+    const category = classifyProviderMessage(message);
     const text = `${String(message?.role || '')}:${textFromContent(message?.content)}`;
     breakdown[category] += estimateTokens(text);
-    images += imageCount(message?.content);
+    images += countImageParts(message?.content);
     messageCount += 1;
   }
 
