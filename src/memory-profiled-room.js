@@ -3,15 +3,6 @@ import { ProfiledRoom } from './profiled-room.js';
 
 const ACTIVE_ROOM_STATUSES = new Set(['starting', 'running', 'paused', 'pausing']);
 
-function insertMemoryDataMessage(messages, content) {
-  if (!content) return Array.isArray(messages) ? messages : [];
-  const next = Array.isArray(messages) ? [...messages] : [];
-  let index = 0;
-  while (index < next.length && next[index]?.role === 'system') index += 1;
-  next.splice(index, 0, { role: 'user', content });
-  return next;
-}
-
 function memoryEventSnapshot(item = {}) {
   return {
     id: String(item.id || '').slice(0, 240),
@@ -164,7 +155,7 @@ export class MemoryProfiledRoom extends ProfiledRoom {
           }
           return profiledStream({
             ...options,
-            messages: insertMemoryDataMessage(options.messages, block),
+            messages: this.contextAssembler.addMemoryContext(options.messages, block),
           });
         } catch (error) {
           this.recordDebug('memory:retrieval-error', { agentId: id, message: error?.message || String(error) });
