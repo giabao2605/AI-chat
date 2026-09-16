@@ -68,6 +68,7 @@ function profilerText(payload) {
 }
 
 function decorateInspector() {
+  if (typeof document === 'undefined') return;
   for (const card of document.querySelectorAll('.lab-debug-card.focus')) {
     if (card.querySelector('.profiler-summary')) continue;
     const pre = card.querySelector('pre');
@@ -83,8 +84,10 @@ function decorateInspector() {
   }
 }
 
-const observer = new MutationObserver(() => decorateInspector());
-observer.observe(document.documentElement, { childList: true, subtree: true });
-decorateInspector();
+if (typeof document !== 'undefined' && typeof MutationObserver !== 'undefined') {
+  const observer = new MutationObserver(() => decorateInspector());
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  decorateInspector();
+}
 
 export { profilerText };
