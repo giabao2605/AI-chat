@@ -1,4 +1,5 @@
 import { MultiAgentRoom } from './multi-agent-room.js';
+import { TurnCoordinator } from './turn-coordinator.js';
 
 const PARALLEL_REPLY_COOLDOWN_MS = 80;
 
@@ -24,6 +25,7 @@ function cloneAgentState(value = {}) {
 export class ParallelBatchRoom extends MultiAgentRoom {
   constructor(options = {}) {
     super(options);
+    if (!(this.turnCoordinator instanceof TurnCoordinator)) this.turnCoordinator = new TurnCoordinator();
     this.ensureParallelRuntime();
   }
 
@@ -162,9 +164,12 @@ export class ParallelBatchRoom extends MultiAgentRoom {
 
   hasUnseenParallelTrigger(agentId) {
     const runtime = this.agentRuntime?.[agentId];
-    const seen = runtime?.parallelSeenIds;
-    if (!(seen instanceof Set)) return super.hasUnseenParallelTrigger(agentId);
-    return this.history.some((item) => item?.id && !seen.has(item.id) && this.parallelRelevantMessage(item, agentId));
+    return this.turnCoordinator.unseenTrigger({
+      history: this.history,
+      seenIds: runtime?.parallelSeenIds instanceof Set ? runtime.parallelSeenIds : null,
+      lastSeenIndex: runtime?.lastSeenIndex ?? -1,
+      relevant: (item) => this.parallelRelevantMessage(item, agentId),
+    });
   }
 
   baseParallelOrder() {
@@ -176,11 +181,9 @@ export class ParallelBatchRoom extends MultiAgentRoom {
   }
 
   nextSchedulingOrder() {
-    const base = this.baseParallelOrder();
-    if (!base.length) return [];
-    const shift = this.parallelScheduleCursor % base.length;
-    this.parallelScheduleCursor = (this.parallelScheduleCursor + 1) % base.length;
-    return [...base.slice(shift), ...base.slice(0, shift)];
+    const rotated = this.turnCoordinator.rotatedOrder(this.baseParallelOrder(), this.parallelScheduleCursor);
+    this.parallelScheduleCursor = rotated.nextCursor;
+    return rotated.order;
   }
 
   startParallelMode(activeRunId = this.runId) {
@@ -193,16 +196,23 @@ export class ParallelBatchRoom extends MultiAgentRoom {
   }
 
   availableParallelSlots() {
-    return Math.max(0, this.maxTurns - this.turn - this.parallelReservedTurns);
+    return this.turnCoordinator.availableParallelSlots({
+      maxTurns: this.maxTurns,
+      turn: this.turn,
+      reservedTurns: this.parallelReservedTurns,
+    });
   }
 
   canStartParallelAgent(agentId, initial = false) {
-    if (!this.isParallelMode() || this.status !== 'running') return false;
-    const runtime = this.agentRuntime?.[agentId];
-    if (!runtime || runtime.running || runtime.parallelReserved) return false;
-    if (this.availableParallelSlots() <= 0) return false;
-    if (initial && this.history.length === 0) return true;
-    return this.hasUnseenParallelTrigger(agentId);
+    return this.turnCoordinator.canStartParallel({
+      isParallel: this.isParallelMode(),
+      status: this.status,
+      runtime: this.agentRuntime?.[agentId],
+      availableSlots: this.availableParallelSlots(),
+      initial,
+      historyEmpty: this.history.length === 0,
+      hasUnseenTrigger: this.hasUnseenParallelTrigger(agentId),
+    });
   }
 
   scheduleParallelAgents(activeRunId = this.runId, { initial = false } = {}) {
@@ -294,10 +304,13 @@ export class ParallelBatchRoom extends MultiAgentRoom {
   }
 
   completeAtLimit() {
-    if (this.status !== 'running'
-      || this.turn < this.maxTurns
-      || this.runningAgentCount() > 0
-      || this.parallelReservedTurns > 0) return false;
+    if (!this.turnCoordinator.limitReached({
+      status: this.status,
+      turn: this.turn,
+      maxTurns: this.maxTurns,
+      runningCount: this.runningAgentCount(),
+      reservedTurns: this.parallelReservedTurns,
+    })) return false;
     return super.completeAtLimit();
   }
 }
