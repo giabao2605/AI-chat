@@ -102,6 +102,16 @@ export class ScenarioRoom extends ReasoningMemoryProfiledRoom {
       error.code = 'SCENARIO_RESUME_UNSUPPORTED';
       throw error;
     }
+
+    const history = Array.isArray(input?.session?.history) ? input.session.history : [];
+    const usedTurns = history.filter((item) => this.agentIds.includes(item?.speaker)).length;
+    const requestedMaxTurns = Math.floor(Number(input?.maxTurns ?? input?.session?.maxTurns));
+    if (usedTurns > 0 && Number.isFinite(requestedMaxTurns) && requestedMaxTurns <= usedTurns) {
+      const error = new Error(`Phiên này đã dùng ${usedTurns}/${requestedMaxTurns} lượt. Hãy tăng số lượt trước khi tiếp tục.`);
+      error.code = 'RESUME_TURN_LIMIT_REACHED';
+      throw error;
+    }
+
     this.scenarioController = null;
     return super.continueFromHistory(input);
   }

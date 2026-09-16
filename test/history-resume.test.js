@@ -1,19 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ResumableConversationRoom } from '../src/resumable-room.js';
+import { ScenarioRoom } from '../src/scenario-room.js';
 import { getHistoryResumePlan } from '../public/history-resume.js';
 
-const agentA = { id: 'a', name: 'Alpha', apiKey: 'x', model: 'm1', baseUrl: 'http://mock' };
-const agentB = { id: 'b', name: 'Beta', apiKey: 'y', model: 'm2', baseUrl: 'http://mock' };
+const agents = {
+  a: { id: 'a', name: 'Alpha', apiKey: 'x', model: 'm1', baseUrl: 'http://mock' },
+  b: { id: 'b', name: 'Beta', apiKey: 'y', model: 'm2', baseUrl: 'http://mock' },
+};
 
 function providerFactory(config) {
   return {
     async streamChat({ messages, onDelta }) {
       const text = `${config.name} tiếp tục`;
-      onDelta(text);
+      onDelta?.(text);
       return {
         text,
         usage: { inputTokens: messages.length, outputTokens: 2, totalTokens: messages.length + 2, exact: true },
+        toolCalls: [],
       };
     },
   };
@@ -61,9 +64,15 @@ test('resume plan requires an explicit higher cap after the old cap is exhausted
   assert.equal(extended.extended, true);
 });
 
-test('room resumes the same historical run and counts toward the original maximum', async () => {
-  delete process.env.AGENT_AUTO_END_ENABLED;
-  const room = new ResumableConversationRoom({ agentA, agentB, hardTurnLimit: 10, providerFactory });
+test('active room branches historical transcript into a new run and counts toward the selected cap', async () => {
+  const room = new ScenarioRoom({
+    agents,
+    hardTurnLimit: 10,
+    providerFactory,
+    contextConfig: { summarizeAfter: 100 },
+  });
+  const session = oldSession();
+  const plan = getHistoryResumePlan(session, { requestedMaxTurns: 99, liveStatus: 'completed' });
   const completed = new Promise((resolve) => {
     const listener = (snapshot) => {
       if (snapshot.status === 'completed') {
@@ -75,15 +84,15 @@ test('room resumes the same historical run and counts toward the original maximu
   });
 
   await room.continueFromHistory({
-    session: oldSession(),
-    maxTurns: 99,
+    session,
+    maxTurns: plan.maxTurns,
     temperature: 0.8,
     maxOutputTokens: 1200,
     sharedPrompt: 'Rules',
   });
 
   const snapshot = await completed;
-  assert.equal(snapshot.runId, 'old-run');
+  assert.notEqual(snapshot.runId, 'old-run');
   assert.equal(snapshot.turn, 4);
   assert.equal(snapshot.maxTurns, 4);
   assert.equal(snapshot.history.length, 4);
@@ -92,9 +101,13 @@ test('room resumes the same historical run and counts toward the original maximu
   assert.equal(snapshot.stats.b.turns, 2);
 });
 
-test('server-side resume rejects an exhausted session until maxTurns is raised', async () => {
-  delete process.env.AGENT_AUTO_END_ENABLED;
-  const room = new ResumableConversationRoom({ agentA, agentB, hardTurnLimit: 10, providerFactory });
+test('active server-side resume rejects an exhausted session until maxTurns is raised', async () => {
+  const room = new ScenarioRoom({
+    agents,
+    hardTurnLimit: 10,
+    providerFactory,
+    contextConfig: { summarizeAfter: 100 },
+  });
   const session = oldSession({ maxTurns: 2, status: 'completed' });
 
   await assert.rejects(
@@ -115,4 +128,5 @@ test('server-side resume rejects an exhausted session until maxTurns is raised',
   const snapshot = await completed;
   assert.equal(snapshot.turn, 3);
   assert.equal(snapshot.maxTurns, 3);
+  assert.notEqual(snapshot.runId, 'old-run');
 });

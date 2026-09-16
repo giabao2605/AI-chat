@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildWebResearchContext, decideWebResearch, getFastNoResearchPlan, getForcedResearchPlan, parseResearchPlan } from '../src/research.js';
-import { ConversationRoom } from '../src/orchestrator.js';
+import { ScenarioRoom } from '../src/scenario-room.js';
 
 test('research plan parser accepts JSON and fails closed on malformed output', () => {
   assert.deepEqual(parseResearchPlan('```json\n{"search":true,"queries":["a","a","b"],"freshness":"pw","reason":"fresh"}\n```'), {
@@ -124,29 +124,25 @@ test('web research context labels sources, treats pages as untrusted, and tells 
   assert.match(context, /KHÔNG được nói rằng bạn không có quyền truy cập web/);
 });
 
-test('conversation room can research before final answer and stores source metadata', async () => {
-  const providerInstances = new Map();
-  const providerFactory = (config) => {
-    const provider = {
-      calls: [],
-      async streamChat(options) {
-        this.calls.push(options);
-        if (options.maxOutputTokens === 220) {
-          return {
-            text: '{"search":true,"queries":["verified fact"],"freshness":"","reason":"verify"}',
-            usage: { inputTokens: 4, outputTokens: 3, totalTokens: 7, exact: true },
-          };
-        }
-        options.onDelta?.('Kết luận dựa trên [1] và [2].');
+test('active room can research before final answer and stores source metadata', async () => {
+  const callsByAgent = { a: [], b: [] };
+  const providerFactory = (config) => ({
+    async streamChat(options) {
+      callsByAgent[config.id]?.push(options);
+      if (options.maxOutputTokens === 220) {
         return {
-          text: 'Kết luận dựa trên [1] và [2].',
-          usage: { inputTokens: 20, outputTokens: 8, totalTokens: 28, exact: true },
+          text: '{"search":true,"queries":["verified fact"],"freshness":"","reason":"verify"}',
+          usage: { inputTokens: 4, outputTokens: 3, totalTokens: 7, exact: true },
         };
-      },
-    };
-    providerInstances.set(config.id, provider);
-    return provider;
-  };
+      }
+      options.onDelta?.('Kết luận dựa trên [1] và [2].');
+      return {
+        text: 'Kết luận dựa trên [1] và [2].',
+        usage: { inputTokens: 20, outputTokens: 8, totalTokens: 28, exact: true },
+        toolCalls: [],
+      };
+    },
+  });
 
   const searchCalls = [];
   const webSearch = {
@@ -164,22 +160,33 @@ test('conversation room can research before final answer and stores source metad
     },
   };
 
-  const room = new ConversationRoom({
-    agentA: { id: 'a', name: 'A', apiKey: 'a', model: 'model-a', baseUrl: 'https://provider.test/v1' },
-    agentB: { id: 'b', name: 'B', apiKey: 'b', model: 'model-b', baseUrl: 'https://provider.test/v1' },
+  const room = new ScenarioRoom({
+    agents: {
+      a: { id: 'a', name: 'A', apiKey: 'a', model: 'model-a', baseUrl: 'https://provider.test/v1' },
+      b: { id: 'b', name: 'B', apiKey: 'b', model: 'model-b', baseUrl: 'https://provider.test/v1' },
+    },
     providerFactory,
     webSearch,
+    deepResearchConfig: { enabled: false },
     hardTurnLimit: 5,
+    contextConfig: { summarizeAfter: 100 },
   });
 
   const done = new Promise((resolve) => room.once('message:done', resolve));
-  await room.start({ topicMode: 'manual', topic: 'Kiểm chứng thông tin hiện tại', maxTurns: 1, startSpeaker: 'a' });
+  await room.start({
+    topicMode: 'manual',
+    conversationMode: 'turns',
+    topic: 'Kiểm chứng thông tin hiện tại',
+    maxTurns: 1,
+    startSpeaker: 'a',
+  });
   const entry = await done;
 
   assert.equal(searchCalls.length, 1);
   assert.equal(entry.sources.length, 2);
   assert.equal(entry.sources[0].snippet, undefined);
-  const finalCall = providerInstances.get('a').calls.find((call) => call.maxOutputTokens !== 220);
-  assert.ok(finalCall.messages.some((message) => message.role === 'system' && /DỮ LIỆU WEB VỪA TRA CỨU/.test(message.content)));
+  const finalCall = callsByAgent.a.find((call) => call.maxOutputTokens !== 220 && typeof call.onDelta === 'function');
+  assert.ok(finalCall);
+  assert.ok(finalCall.messages.some((message) => message.role === 'user' && /<untrusted_web_evidence>/.test(String(message.content))));
   assert.equal(room.stats.a.totalTokens, 35);
 });

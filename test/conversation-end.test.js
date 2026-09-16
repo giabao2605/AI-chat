@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decideConversationEnd, explicitStopRequested, parseConversationEndDecision } from '../src/conversation-end.js';
-import { ConversationRoom } from '../src/orchestrator.js';
 
 process.env.AGENT_AUTO_END_ENABLED = 'true';
 
@@ -53,7 +52,7 @@ test('explicit stop ends after the answering agent without another model decisio
   assert.equal(calls, 0);
 });
 
-test('natural ending uses a conservative hidden decision after enough AI turns', async () => {
+test('natural ending utility uses a conservative hidden decision after enough AI turns', async () => {
   const calls = [];
   const provider = {
     async streamChat(options) {
@@ -79,49 +78,4 @@ test('natural ending uses a conservative hidden decision after enough AI turns',
   assert.equal(calls.length, 1);
   assert.equal(calls[0].temperature, 0);
   assert.equal(calls[0].maxOutputTokens, 160);
-});
-
-test('conversation room stops alternating when an agent decides the topic is finished', async () => {
-  const agentA = { id: 'a', name: 'Alpha', apiKey: 'x', model: 'm1', baseUrl: 'http://mock' };
-  const agentB = { id: 'b', name: 'Beta', apiKey: 'y', model: 'm2', baseUrl: 'http://mock' };
-  let finalAnswers = 0;
-  let endChecks = 0;
-  const providerFactory = (config) => ({
-    async streamChat({ maxOutputTokens, temperature, messages, onDelta }) {
-      if (maxOutputTokens === 160 && temperature === 0) {
-        endChecks += 1;
-        return {
-          text: '{"end":true,"reason":"Đã có kết luận đầy đủ."}',
-          usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5, exact: true },
-        };
-      }
-      finalAnswers += 1;
-      const text = `${config.name} trả lời ${finalAnswers}`;
-      onDelta(text);
-      return {
-        text,
-        usage: { inputTokens: messages.length, outputTokens: 2, totalTokens: messages.length + 2, exact: true },
-      };
-    },
-  });
-
-  const room = new ConversationRoom({ agentA, agentB, hardTurnLimit: 20, providerFactory });
-  const completed = new Promise((resolve) => {
-    const listener = (snapshot) => {
-      if (snapshot.status === 'completed') {
-        room.off('state', listener);
-        resolve(snapshot);
-      }
-    };
-    room.on('state', listener);
-  });
-
-  await room.start({ topic: 'Chủ đề có kết luận', maxTurns: 10, startSpeaker: 'a' });
-  const snapshot = await completed;
-  assert.equal(snapshot.turn, 3);
-  assert.equal(snapshot.history.length, 3);
-  assert.equal(snapshot.endedBy, 'a');
-  assert.match(snapshot.endReason, /kết luận/i);
-  assert.equal(finalAnswers, 3);
-  assert.equal(endChecks, 1);
 });

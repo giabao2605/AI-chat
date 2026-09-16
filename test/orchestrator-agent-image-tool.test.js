@@ -1,22 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ConversationRoom } from '../src/orchestrator.js';
+import { ScenarioRoom } from '../src/scenario-room.js';
 
-const agentA = { id: 'a', name: 'Alpha', apiKey: 'x', model: 'm1', baseUrl: 'http://mock' };
-const agentB = { id: 'b', name: 'Beta', apiKey: 'y', model: 'm2', baseUrl: 'http://mock' };
+const agents = {
+  a: { id: 'a', name: 'Alpha', apiKey: 'x', model: 'm1', baseUrl: 'http://mock' },
+  b: { id: 'b', name: 'Beta', apiKey: 'y', model: 'm2', baseUrl: 'http://mock' },
+};
 
 const usage = { inputTokens: 4, outputTokens: 2, totalTokens: 6, exact: true };
 
-test('agent may call generate_image, receives the generated image in context, then finishes the same turn', async () => {
-  let imagePrompts = [];
+test('active agent may call generate_image, receives the generated image in context, then finishes the same turn', async () => {
+  const imagePrompts = [];
   let aCalls = 0;
   let sawImageOnFollowup = false;
   const providerFactory = (config) => ({
     async streamChat({ messages, tools, onDelta }) {
       if (config.id !== 'a') throw new Error('Beta should not run in a one-turn test');
       aCalls += 1;
+      const toolNames = (tools || []).map((tool) => tool?.function?.name).filter(Boolean);
       if (aCalls === 1) {
-        assert.equal(tools?.[0]?.function?.name, 'generate_image');
+        assert.ok(toolNames.includes('generate_image'));
         return {
           text: '',
           toolCalls: [{
@@ -29,11 +32,11 @@ test('agent may call generate_image, receives the generated image in context, th
         };
       }
 
-      assert.equal(tools?.length || 0, 0, 'default limit allows only one image call per turn');
+      assert.equal(toolNames.includes('generate_image'), false, 'default limit allows only one image call per turn');
       sawImageOnFollowup = messages.some((message) => Array.isArray(message.content)
         && message.content.some((part) => part?.type === 'image_url'));
       const text = 'Ảnh vừa tạo có hồ nước xanh và núi đá, khá hợp chủ đề.';
-      onDelta(text);
+      onDelta?.(text);
       return { text, toolCalls: [], usage, toolsAccepted: false };
     },
   });
@@ -58,14 +61,14 @@ test('agent may call generate_image, receives the generated image in context, th
       : item.attachments,
   }));
 
-  const room = new ConversationRoom({
-    agentA,
-    agentB,
+  const room = new ScenarioRoom({
+    agents,
     hardTurnLimit: 10,
     providerFactory,
     imageTool,
     imageContextResolver,
     maxImageToolCallsPerTurn: 1,
+    contextConfig: { summarizeAfter: 100 },
   });
 
   const completed = new Promise((resolve) => {
@@ -78,7 +81,14 @@ test('agent may call generate_image, receives the generated image in context, th
     room.on('state', listener);
   });
 
-  await room.start({ topic: 'Phong cảnh', maxTurns: 1, startSpeaker: 'a', sharedPrompt: 'Rules' });
+  await room.start({
+    topicMode: 'manual',
+    conversationMode: 'turns',
+    topic: 'Phong cảnh',
+    maxTurns: 1,
+    startSpeaker: 'a',
+    sharedPrompt: 'Rules',
+  });
   const snapshot = await completed;
 
   assert.deepEqual(imagePrompts, ['hồ nước xanh giữa núi đá']);
