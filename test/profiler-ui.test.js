@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { profilerText } from '../public/profiler-ui.js';
 
-test('profiler formatter renders performance, context budget and token anatomy', () => {
+test('profiler formatter renders performance, queue, retry, context budget and token anatomy', () => {
   const text = profilerText({
     debug: {
       totalMs: 2500,
@@ -10,6 +10,11 @@ test('profiler formatter renders performance, context budget and token anatomy',
       research: { ms: 300 },
       providerCalls: [{
         ms: 1800,
+        queueMs: 120,
+        poolConcurrencyAtAcquire: 3,
+        rateLimitRetries: 1,
+        retryWaitMs: 500,
+        retryAfterSources: ['seconds'],
         finalHeadersMs: 500,
         firstTextMs: 900,
         contextBudget: {
@@ -41,6 +46,8 @@ test('profiler formatter renders performance, context budget and token anatomy',
 
   assert.match(text, /PERFORMANCE/);
   assert.match(text, /Turn total: 2500 ms/);
+  assert.match(text, /Provider queue: 120 ms · concurrency 3/);
+  assert.match(text, /Rate-limit retries: 1 · waited 500 ms · seconds/);
   assert.match(text, /CONTEXT BUDGET/);
   assert.match(text, /Budget: 12\.000 tokens · target 10\.560/);
   assert.match(text, /Estimated input: 14\.000 → 9\.800/);
