@@ -74,8 +74,12 @@ export function loopSimilarity(a, b) {
   return union ? intersection / union : 0;
 }
 
-export function detectConversationLoop(history = [], threshold = 0.74) {
-  const ai = history.filter((item) => /^[a-d]$/.test(item?.speaker || '')).slice(-4);
+export function detectConversationLoop(history = [], threshold = 0.74, agentIds = null) {
+  const configuredAgents = Array.isArray(agentIds) && agentIds.length ? new Set(agentIds) : null;
+  const ai = history.filter((item) => {
+    const speaker = String(item?.speaker || '');
+    return configuredAgents ? configuredAgents.has(speaker) : /^[a-z]$/.test(speaker);
+  }).slice(-4);
   if (ai.length < 3) return false;
   const scores = [];
   for (let i = 1; i < ai.length; i += 1) scores.push(loopSimilarity(ai[i - 1].text, ai[i].text));
@@ -243,7 +247,7 @@ export class MultiAgentRoom extends EventEmitter {
 
   validateAgents() {
     if (!this.agentConfigs.a?.apiKey || !this.agentConfigs.b?.apiKey) {
-      throw new Error('Agent A và Agent B phải được cấu hình đầy đủ. Agent C/D là tùy chọn.');
+      throw new Error('Agent A và Agent B phải được cấu hình đầy đủ. Agent C-F là tùy chọn.');
     }
     if (this.agentIds.length < 2) throw new Error('Cần ít nhất hai AI được cấu hình.');
   }
@@ -713,7 +717,7 @@ export class MultiAgentRoom extends EventEmitter {
     const recentStart = Math.max(this.summaryCoveredIndex, historySnapshot.length - this.contextConfig.recentMessages);
     const recentRaw = historySnapshot.slice(recentStart);
     const recentHistory = await this.historyForModel(recentRaw);
-    const loopGuard = detectConversationLoop(historySnapshot, this.contextConfig.loopThreshold);
+    const loopGuard = detectConversationLoop(historySnapshot, this.contextConfig.loopThreshold, this.agentIds);
     const messages = buildAgentMessages({
       agentId,
       agentName: agent.name,

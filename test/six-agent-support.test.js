@@ -136,10 +136,11 @@ test('history resume accounting counts E/F as AI turns', () => {
 });
 
 test('six-agent UI and markdown surfaces include E/F', async () => {
-  const [session, extension, markdown] = await Promise.all([
+  const [session, extension, markdown, lab] = await Promise.all([
     readFile(new URL('../public/room-session.js', import.meta.url), 'utf8'),
     readFile(new URL('../public/six-agent-ui.js', import.meta.url), 'utf8'),
     readFile(new URL('../public/markdown-ui.js', import.meta.url), 'utf8'),
+    readFile(new URL('../public/lab-v2.js', import.meta.url), 'utf8'),
   ]);
   assert.match(session, /six-agent-ui\.js/);
   assert.match(session, /'c', 'd', 'e', 'f'/);
@@ -147,4 +148,6 @@ test('six-agent UI and markdown surfaces include E/F', async () => {
   assert.match(extension, /agent\$\{upper\}Total/);
   assert.match(markdown, /\.message\.e \.bubble/);
   assert.match(markdown, /\.message\.f \.bubble/);
+  assert.match(lab, /countHistoryAiTurns\(history\)/);
+  assert.match(lab, /config\?\.agentSlots/);
 });

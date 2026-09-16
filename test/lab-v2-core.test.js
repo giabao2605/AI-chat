@@ -18,7 +18,7 @@ test('room manager isolates room instances', () => {
   assert.equal(manager.stats().rooms, 2);
 });
 
-test('loop detector catches repeated AI phrasing', () => {
+test('loop detector catches repeated AI phrasing across all configured agents', () => {
   const a = 'Chúng ta nên ưu tiên kiểm thử tự động vì nó giúp phát hiện lỗi sớm và giảm regression.';
   const b = 'Theo tôi chúng ta nên ưu tiên kiểm thử tự động để phát hiện lỗi sớm và giảm regression.';
   assert.ok(loopSimilarity(a, b) > 0.5);
@@ -27,6 +27,11 @@ test('loop detector catches repeated AI phrasing', () => {
     { speaker: 'b', text: b },
     { speaker: 'c', text: a },
   ], 0.5), true);
+  assert.equal(detectConversationLoop([
+    { speaker: 'e', text: a },
+    { speaker: 'f', text: b },
+    { speaker: 'e', text: a },
+  ], 0.5, ['a', 'b', 'c', 'd', 'e', 'f']), true);
 });
 
 test('multi-agent room can schedule Agent C in a four-agent room', async () => {

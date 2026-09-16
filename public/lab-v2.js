@@ -1,3 +1,5 @@
+import { countHistoryAiTurns } from './history-resume.js';
+
 const $ = (id) => document.getElementById(id);
 const extraPersonaKey = window.__AI_CHAT_DB__?.extraPersonasKey || 'ai-chat-extra-personas-v1';
 const historyKey = 'ai-chat-history-v1';
@@ -174,7 +176,7 @@ function applyPreset(key) {
   setField('conversationMode', preset.mode);
   if (key === 'default') setField('sharedPrompt', config?.defaults?.sharedPrompt || '');
   else setField('sharedPrompt', `${config?.defaults?.sharedPrompt || ''}\n\nQUY TẮC PRESET:\n${preset.shared}`);
-  for (const id of ['a', 'b', 'c', 'd']) setField(`persona${id.toUpperCase()}`, preset.personas[id] || '');
+  for (const id of config?.agentSlots || ['a', 'b', 'c', 'd']) setField(`persona${id.toUpperCase()}`, preset.personas[id] || '');
   saveExtraPersonas();
 }
 
@@ -261,7 +263,7 @@ async function forkFromMessage(messageId) {
   const index = source.history.findIndex((item) => item.id === messageId);
   if (index < 0) return;
   const history = source.history.slice(0, index + 1);
-  const usedTurns = history.filter((item) => /^[a-d]$/.test(item.speaker || '')).length;
+  const usedTurns = countHistoryAiTurns(history);
   const session = {
     runId: source.runId,
     topic: source.topic,
