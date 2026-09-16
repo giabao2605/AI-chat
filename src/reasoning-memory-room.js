@@ -1,3 +1,4 @@
+import { applyContextBudget } from './context-budget.js';
 import { MemoryProfiledRoom } from './memory-profiled-room.js';
 import { finalizeProviderInputProfile, profileProviderInput } from './request-metrics.js';
 
@@ -39,6 +40,14 @@ export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
     super(options);
     this.reasoningMode = 'auto';
     this.reasoningProbeCache = new Map();
+    const contextConfig = options.contextConfig && typeof options.contextConfig === 'object' ? options.contextConfig : {};
+    this.contextBudgetConfig = {
+      budgetTokens: Math.max(0, Number(contextConfig.inputBudgetTokens) || 0),
+      safetyMargin: Number.isFinite(Number(contextConfig.budgetSafetyMargin)) ? Number(contextConfig.budgetSafetyMargin) : 0.12,
+      imageTokenReserve: Math.max(0, Number(contextConfig.imageTokenReserve) || 1500),
+      minRecentMessages: Math.max(1, Number(contextConfig.minRecentMessages) || 4),
+      agentBudgets: contextConfig.agentBudgets && typeof contextConfig.agentBudgets === 'object' ? { ...contextConfig.agentBudgets } : {},
+    };
 
     const baseProviderFactory = this.providerFactory;
     this.reasoningBaseProviderFactory = baseProviderFactory;
@@ -54,11 +63,25 @@ export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
         const isMainAgentTurn = isMainAgentProvider
           && this.profileTurnActive?.has(agentId)
           && !this.profileOverrideSuppressed?.has(agentId);
-        const effectiveRequest = manualMode && isMainAgentTurn ? {
+        let effectiveRequest = manualMode && isMainAgentTurn ? {
           ...request,
           reasoningEffort: manualMode,
           adaptiveReasoning: false,
         } : request;
+
+        let contextBudget = null;
+        if (isMainAgentTurn) {
+          const budgetTokens = Math.max(0, Number(this.contextBudgetConfig.agentBudgets?.[agentId]) || this.contextBudgetConfig.budgetTokens || 0);
+          const budgeted = applyContextBudget(effectiveRequest.messages, effectiveRequest.tools, {
+            budgetTokens,
+            safetyMargin: this.contextBudgetConfig.safetyMargin,
+            imageTokenReserve: this.contextBudgetConfig.imageTokenReserve,
+            minRecentMessages: this.contextBudgetConfig.minRecentMessages,
+          });
+          effectiveRequest = { ...effectiveRequest, messages: budgeted.messages };
+          contextBudget = budgeted.debug;
+        }
+
         const inputProfile = profileProviderInput(effectiveRequest.messages, effectiveRequest.tools);
         const result = await streamChat(effectiveRequest);
         const profiledResult = {
@@ -66,6 +89,7 @@ export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
           diagnostics: {
             ...(result?.diagnostics || {}),
             inputProfile: finalizeProviderInputProfile(inputProfile, result?.usage),
+            ...(contextBudget ? { contextBudget } : {}),
           },
         };
 
