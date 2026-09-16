@@ -152,11 +152,8 @@ export class ScenarioRoom extends ReasoningMemoryProfiledRoom {
   injectScenarioContext(agentId, messages) {
     if (!this.scenarioController || !Array.isArray(messages)) return messages;
     const blocks = scenarioContextBlocks(this.scenarioController, agentId);
-    const additions = [
-      blocks.publicBlock ? { role: 'system', content: blocks.publicBlock } : null,
-      blocks.privateBlock ? { role: 'system', content: blocks.privateBlock } : null,
-    ].filter(Boolean);
-    if (additions.length) messages.splice(1, 0, ...additions);
+    const assembled = this.contextAssembler.addScenarioContext(messages, blocks);
+    messages.splice(0, messages.length, ...assembled);
     return messages;
   }
 
