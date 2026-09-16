@@ -91,6 +91,20 @@ function augmentBody(input, init = {}) {
       body.personas[id] = persona;
     }
     body.agentProfiles = readAgentProfiles();
+
+    if (/\/api\/start(?:\?|$)/.test(path)) {
+      const scenarioId = String(document.getElementById('scenarioMode')?.value || '').trim().toLowerCase();
+      if (scenarioId) {
+        body.scenarioId = scenarioId;
+        if (scenarioId === 'werewolf') {
+          body.conversationMode = 'turns';
+          body.topicMode = 'manual';
+        }
+      } else {
+        delete body.scenarioId;
+      }
+    }
+
     return { ...init, body: JSON.stringify(body) };
   } catch {
     return init;
