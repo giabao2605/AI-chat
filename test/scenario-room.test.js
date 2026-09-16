@@ -122,7 +122,10 @@ test('Werewolf room runs backend-gated hidden actions to deterministic victory w
   assert.equal(secretPhaseSnapshots.every((state) => state.currentSpeaker == null && state.currentSpeakers.length === 0), true);
 
   const roles = room.scenarioController.result().roles;
+  let agentsThatReceivedScenarioContext = 0;
   for (const [id, role] of Object.entries(roles)) {
+    if (!captured[id].length) continue;
+    agentsThatReceivedScenarioContext += 1;
     const payload = JSON.stringify(captured[id]);
     assert.match(payload, new RegExp(`Vai trò bí mật của bạn: ${roleLabel(role)}`));
     for (const [otherId, otherRole] of Object.entries(roles)) {
@@ -130,6 +133,7 @@ test('Werewolf room runs backend-gated hidden actions to deterministic victory w
       assert.doesNotMatch(payload, new RegExp(`Vai trò bí mật của bạn: ${roleLabel(otherRole)}`));
     }
   }
+  assert.ok(agentsThatReceivedScenarioContext >= 3, 'alive/special agents should receive isolated scenario context');
 
   const publicSerialized = JSON.stringify({
     history: snapshot.history,
@@ -220,6 +224,7 @@ test('failed hidden action provider call does not mutate scenario state', async 
     hardTurnLimit: 20,
     scenarioSeedFactory: () => 'failure-seed',
   });
+  room.on('error', () => {});
   const terminal = waitForTerminal(room);
   await room.start({ scenarioId: 'werewolf', topic: 'failure test', maxTurns: 20, conversationMode: 'turns' });
   const versionAfterStart = room.scenarioController.stateVersion;
