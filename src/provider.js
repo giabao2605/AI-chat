@@ -1,3 +1,13 @@
+import {
+  abortableDelay,
+  defaultProviderScheduler,
+  exponentialBackoffMs,
+  parseRetryAfter,
+  providerPoolKey,
+  providerRetryDefaultsFromEnv,
+  providerSchedulerDefaultsFromEnv,
+} from './provider-scheduler.js';
+
 function chatEndpoint(baseUrl) {
   const normalized = String(baseUrl || '').trim().replace(/\/+$/, '');
   if (!normalized) throw new Error('Provider base URL is missing.');
@@ -8,6 +18,8 @@ function chatEndpoint(baseUrl) {
 const REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh', 'max']);
 const RETRYABLE_STATUSES = new Set([400, 404, 415, 422]);
 const CAPABILITY_CACHE = new Map();
+const SCHEDULER_DEFAULTS = providerSchedulerDefaultsFromEnv();
+const RETRY_DEFAULTS = providerRetryDefaultsFromEnv();
 
 function adaptiveModel(model) {
   return /^gpt-5\.6(?:-|$)/i.test(String(model || '').trim());
@@ -294,14 +306,51 @@ function errorTextForFeature(errorText, feature) {
   return false;
 }
 
+function providerHttpError(response, errorText = '') {
+  const error = new Error(`Provider returned HTTP ${response.status}: ${errorText || response.statusText}`);
+  error.code = 'PROVIDER_HTTP_ERROR';
+  error.status = response.status;
+  return error;
+}
+
+function shouldCountCircuitFailure(error, signal) {
+  if (signal?.aborted || error?.name === 'AbortError') return false;
+  if (error?.code === 'PROVIDER_QUEUE_TIMEOUT') return false;
+  const status = Number(error?.status);
+  if (Number.isFinite(status) && status >= 400 && status < 500) return false;
+  return true;
+}
+
 export class OpenAICompatibleProvider {
-  constructor({ baseUrl, apiKey, model, timeoutMs = 120000, circuitFailureThreshold = 3, circuitCooldownMs = 30000 }) {
+  constructor({
+    baseUrl,
+    apiKey,
+    model,
+    timeoutMs = 120000,
+    circuitFailureThreshold = 3,
+    circuitCooldownMs = 30000,
+    scheduler = defaultProviderScheduler,
+    maxConcurrentRequests = SCHEDULER_DEFAULTS.maxConcurrent,
+    queueTimeoutMs = SCHEDULER_DEFAULTS.queueTimeoutMs,
+    rateLimitMaxRetries = RETRY_DEFAULTS.maxRetries,
+    retryBaseMs = RETRY_DEFAULTS.baseMs,
+    retryMaxMs = RETRY_DEFAULTS.maxMs,
+    retryRandom = Math.random,
+  }) {
     this.endpoint = chatEndpoint(baseUrl);
     this.apiKey = apiKey;
     this.model = model;
     this.timeoutMs = Math.max(1000, Number(timeoutMs) || 120000);
     this.circuitFailureThreshold = Math.max(1, Number(circuitFailureThreshold) || 3);
     this.circuitCooldownMs = Math.max(1000, Number(circuitCooldownMs) || 30000);
+    this.scheduler = scheduler || defaultProviderScheduler;
+    this.poolKey = providerPoolKey(this.endpoint, this.apiKey);
+    this.maxConcurrentRequests = Math.max(0, Math.floor(Number(maxConcurrentRequests) || 0));
+    this.queueTimeoutMs = Math.max(0, Math.floor(Number(queueTimeoutMs) || 0));
+    this.rateLimitMaxRetries = Math.max(0, Math.min(8, Math.floor(Number(rateLimitMaxRetries) || 0)));
+    this.retryBaseMs = Math.max(10, Math.floor(Number(retryBaseMs) || 500));
+    this.retryMaxMs = Math.max(this.retryBaseMs, Math.floor(Number(retryMaxMs) || 8000));
+    this.retryRandom = typeof retryRandom === 'function' ? retryRandom : Math.random;
     this.failureCount = 0;
     this.circuitOpenUntil = 0;
     this.capabilities = capabilityState(this.endpoint, this.model);
@@ -336,19 +385,30 @@ export class OpenAICompatibleProvider {
     this.assertCircuit();
     const started = Date.now();
     try {
-      const result = await this.#streamChat(options, started);
+      const scheduled = await this.scheduler.run(
+        this.poolKey,
+        () => this.#streamChat(options, started),
+        {
+          signal: options?.signal,
+          queueTimeoutMs: this.queueTimeoutMs,
+          maxConcurrent: this.maxConcurrentRequests,
+        },
+      );
+      const result = scheduled.value;
       this.registerSuccess();
       return {
         ...result,
         diagnostics: {
           ...(result.diagnostics || {}),
+          queueMs: scheduled.queueMs,
+          poolConcurrencyAtAcquire: scheduled.concurrencyAtAcquire,
           elapsedMs: Date.now() - started,
           timeoutMs: this.timeoutMs,
           circuit: this.circuitState(),
         },
       };
     } catch (error) {
-      if (!options?.signal?.aborted) this.registerFailure();
+      if (shouldCountCircuitFailure(error, options?.signal)) this.registerFailure();
       throw error;
     }
   }
@@ -386,6 +446,10 @@ export class OpenAICompatibleProvider {
     const disabledThisCall = new Set();
     let body = null;
     let response = null;
+    let rateLimitRetries = 0;
+    let retryWaitMs = 0;
+    const retryAfterSources = [];
+    const maxTotalRetryWaitMs = this.retryMaxMs * this.rateLimitMaxRetries;
 
     const makeBody = () => ({
       model: this.model,
@@ -423,21 +487,44 @@ export class OpenAICompatibleProvider {
         tools: useTools,
         vision: multimodal && !visionFallback,
         retryReason: null,
+        retryWaitMs: 0,
+        retryAfterSource: null,
       });
       return res;
     };
 
-    // Retry only when the provider explicitly identifies an unsupported capability.
-    // Never walk a blind fallback ladder for a generic 400: each speculative retry can
-    // cost another full model queue/TTFT and was the main source of multi-second stalls.
-    for (let guard = 0; guard < 6; guard += 1) {
+    // Capability fallback and rate-limit retry are deliberately separate budgets.
+    // A capability retry changes request shape; a 429/temporary 503 retry repeats the
+    // same request only after an explicit HTTP response, never after ambiguous network failure.
+    for (let guard = 0; guard < 6 + this.rateLimitMaxRetries; guard += 1) {
       response = await doRequest();
       if (response.ok) break;
 
       const errorText = (await response.text()).slice(0, 4000);
-      if (!RETRYABLE_STATUSES.has(response.status)) {
-        throw new Error(`Provider returned HTTP ${response.status}: ${errorText || response.statusText}`);
+      const retryAfter = parseRetryAfter(response.headers?.get?.('retry-after'));
+      const rateRetryable = response.status === 429 || (response.status === 503 && retryAfter !== null);
+      if (rateRetryable && rateLimitRetries < this.rateLimitMaxRetries) {
+        const source = retryAfter?.source || 'backoff';
+        const delayMs = retryAfter?.delayMs ?? exponentialBackoffMs(rateLimitRetries, {
+          baseMs: this.retryBaseMs,
+          maxMs: this.retryMaxMs,
+          random: this.retryRandom,
+        });
+        if (retryWaitMs + delayMs <= maxTotalRetryWaitMs) {
+          const attempt = attempts[attempts.length - 1];
+          attempt.retryReason = `http-${response.status}`;
+          attempt.retryWaitMs = delayMs;
+          attempt.retryAfterSource = source;
+          retryAfterSources.push(source);
+          rateLimitRetries += 1;
+          retryWaitMs += delayMs;
+          this.scheduler.setCooldown(this.poolKey, delayMs);
+          await abortableDelay(delayMs, signal);
+          continue;
+        }
       }
+
+      if (!RETRYABLE_STATUSES.has(response.status)) throw providerHttpError(response, errorText);
 
       let feature = '';
       if (includeUsage && !disabledThisCall.has('streamUsage') && errorTextForFeature(errorText, 'streamUsage')) feature = 'streamUsage';
@@ -446,9 +533,7 @@ export class OpenAICompatibleProvider {
       else if (multimodal && !visionFallback && !disabledThisCall.has('vision') && errorTextForFeature(errorText, 'vision')) feature = 'vision';
       else if (useTools && !disabledThisCall.has('tools') && errorTextForFeature(errorText, 'tools')) feature = 'tools';
 
-      if (!feature) {
-        throw new Error(`Provider returned HTTP ${response.status}: ${errorText || response.statusText}`);
-      }
+      if (!feature) throw providerHttpError(response, errorText);
 
       disabledThisCall.add(feature);
       attempts[attempts.length - 1].retryReason = feature;
@@ -471,7 +556,12 @@ export class OpenAICompatibleProvider {
       }
     }
 
-    if (!response?.ok) throw new Error('Provider fallback budget exhausted.');
+    if (!response?.ok) {
+      const error = new Error('Provider fallback/retry budget exhausted.');
+      error.code = 'PROVIDER_RETRY_EXHAUSTED';
+      error.status = response?.status || 0;
+      throw error;
+    }
     if (multimodal && !visionFallback) capabilities.visionSupport = true;
     if (externalTools.length && useTools) capabilities.toolSupport = true;
     if (useReasoning) capabilities.reasoningControlSupport = true;
@@ -536,6 +626,9 @@ export class OpenAICompatibleProvider {
         requestCount: attempts.length,
         retries: Math.max(0, attempts.length - 1),
         attempts,
+        rateLimitRetries,
+        retryWaitMs,
+        retryAfterSources,
         firstSignalMs: firstSignalAt ? firstSignalAt - overallStarted : null,
         firstTextMs: firstTextAt ? firstTextAt - overallStarted : null,
         firstToolMs: firstToolAt ? firstToolAt - overallStarted : null,
