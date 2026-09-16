@@ -30,7 +30,8 @@ function profilerText(payload) {
   const calls = Array.isArray(debug.providerCalls) ? debug.providerCalls : [];
   const lastCall = calls[calls.length - 1] || null;
   const profile = lastCall?.inputProfile || null;
-  if (!profile && !debug.totalMs && !calls.length) return '';
+  const budget = lastCall?.contextBudget || null;
+  if (!profile && !budget && !debug.totalMs && !calls.length) return '';
 
   const providerMs = calls.reduce((sum, call) => sum + (Number(call?.ms) || 0), 0);
   const lines = [
@@ -46,6 +47,35 @@ function profilerText(payload) {
   }
   if (debug.research?.ms) lines.push(`Research: ${ms(debug.research.ms)}`);
   if (debug.summary?.ms) lines.push(`Summary: ${ms(debug.summary.ms)}`);
+
+  if (budget?.enabled) {
+    lines.push('', 'CONTEXT BUDGET');
+    lines.push(`Budget: ${tokens(budget.budgetTokens)} tokens · target ${tokens(budget.targetTokens)}`);
+    lines.push(`Estimated input: ${tokens(budget.beforeEstimatedTokens)} → ${tokens(budget.afterEstimatedTokens)}`);
+    const dropped = Array.isArray(budget.dropped) ? budget.dropped : [];
+    if (dropped.length) {
+      const byCategory = new Map();
+      for (const item of dropped) {
+        const category = String(item?.category || 'other');
+        const current = byCategory.get(category) || { count: 0, tokens: 0 };
+        current.count += 1;
+        current.tokens += Number(item?.estimatedTokens) || 0;
+        byCategory.set(category, current);
+      }
+      const summary = [...byCategory.entries()].map(([category, value]) => {
+        const label = BREAKDOWN_LABELS[category] || category;
+        return `${label}: ${value.count} (~${tokens(value.tokens)})`;
+      }).join(' · ');
+      lines.push(`Dropped ${dropped.length}: ${summary}`);
+    } else {
+      lines.push('Dropped: 0');
+    }
+    if (budget.overBudget) {
+      lines.push(budget.mandatoryExceeded
+        ? 'Warning: protected/mandatory context alone still exceeds target; it was preserved rather than truncated blindly.'
+        : 'Warning: request remains above target after allowed pruning.');
+    }
+  }
 
   if (profile) {
     lines.push('', 'TOKEN ANATOMY');
