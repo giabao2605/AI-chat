@@ -74,8 +74,8 @@ test('scenario UI exposes Werewolf selector and only public-state surfaces', asy
 
   assert.match(ui, /configuredCount < 4/);
   assert.match(ui, /scenario\.state/);
+  assert.match(ui, /scenarioForMessage/);
   assert.match(ui, /button\.remove\(\)/);
-  assert.match(ui, /resumeSupported/);
   assert.doesNotMatch(ui, /scenario_private_state|privateContextFor|rolesByAgent|\.roles\b/);
 
   assert.match(history, /scenario: snapshot\.scenario \? clone\(snapshot\.scenario\) : null/);
