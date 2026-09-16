@@ -19,7 +19,7 @@ import { AgentMemoryManager } from './agent-memory.js';
 import { CloudflareImageTool } from './cloudflare-image-tool.js';
 import { createImageContextResolver } from './image-context.js';
 import { OpenAICompatibleImageTool } from './image-tool.js';
-import { ReasoningMemoryProfiledRoom } from './reasoning-memory-room.js';
+import { ScenarioRoom } from './scenario-room.js';
 import { SqliteMemoryStore } from './memory-store.js';
 import { RoomManager } from './room-manager.js';
 import { resolveRequestRoomId } from './room-routing.js';
@@ -83,7 +83,7 @@ const manager = new RoomManager({
   maxRooms: serverConfig.maxRooms,
   roomTtlMs: serverConfig.roomTtlMs,
   createRoom(roomId) {
-    const room = new ReasoningMemoryProfiledRoom({
+    const room = new ScenarioRoom({
       roomId,
       memoryManager,
       agents: configuredAgents,
