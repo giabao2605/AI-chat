@@ -51,15 +51,18 @@ The project currently includes:
 - Private agent-to-agent context that does not enter the public transcript.
 - Per-agent persistent long-term memory.
 - Transcript compaction / context summarization with background refresh in the profiled runtime.
+- Per-agent input context budgeting.
 - Loop detection / steering guard across all configured agents.
 - Tavily web research and optional deeper reading of top sources.
 - Image generation tools and image context passed back to capable models.
 - Auto/manual reasoning-effort control when supported by the provider/model.
+- Provider scheduling/rate-limit coordination and retry/backoff diagnostics.
+- Per-turn token anatomy / performance diagnostics.
+- Deterministic backend scenario engine; Werewolf/Ma Sói is the current game scenario.
 - Realtime SSE streaming and per-agent status.
-- Session history and resume.
+- Session history and resume/fork.
 - Multi-room support with a feature flag.
 - Inspector/debug metadata.
-- Conversation forking.
 - Conversation preset implementation; its UI is currently intentionally hidden.
 - IndexedDB + localStorage browser persistence.
 - Markdown rendering and math rendering.
@@ -67,7 +70,7 @@ The project currently includes:
 
 ## 4. Active runtime shape
 
-The main server currently constructs `ReasoningMemoryProfiledRoom`. The active inheritance chain is approximately:
+The main server constructs `ScenarioRoom`. The active inheritance chain is:
 
 ```text
 MultiAgentRoom
@@ -75,13 +78,22 @@ MultiAgentRoom
     -> ProfiledRoom
       -> MemoryProfiledRoom
         -> ReasoningMemoryProfiledRoom
+          -> ScenarioRoom
 ```
 
-This is important when debugging provider calls or context assembly because multiple layers wrap/augment the same turn. Do not assume all behavior lives in `multi-agent-room.js`.
+Task 5 moved the most coupled turn concerns behind composition boundaries without forcing a risky full hierarchy rewrite:
+
+- `TurnCoordinator` owns scheduling decisions.
+- `ContextAssembler` owns base message assembly, context placement and budget application semantics.
+- `AgentExecutor` owns provider streaming, first-token/message events, image-tool execution loops, usage aggregation and cancellation/failure signaling.
+
+The active server path uses those components through the room chain. Profile/private-context, memory, reasoning and scenario behavior remain layered because flattening them further would currently increase migration risk more than it reduces complexity.
+
+The old standalone `ConversationRoom` / `ResumableConversationRoom` runtime was removed after its remaining regression coverage was migrated to the active path.
 
 ### `src/server.js`
 
-Main backend entrypoint. It builds the Node HTTP server, room manager, SSE wiring, web search, memory and image services, then exposes the HTTP API.
+Main backend entrypoint. It builds the Node HTTP server, room manager, SSE wiring, web search, memory and image services, then exposes the HTTP API. It constructs `ScenarioRoom` for live rooms.
 
 Important routes currently include:
 
@@ -106,7 +118,7 @@ Important routes currently include:
 
 ### `src/config.js`
 
-Central environment/config parser. It covers Agent A-F configuration, shared provider credentials, server/multi-room settings, web/deep research, context summarization, memory, image generation/input and public frontend config.
+Central environment/config parser. It covers Agent A-F configuration, shared provider credentials, server/multi-room settings, web/deep research, context summarization/budgeting, memory, image generation/input and public frontend config.
 
 ### `src/provider.js`
 
@@ -122,13 +134,29 @@ Key behavior:
 - Capability cache/fallback for stream usage, prompt cache, reasoning, vision and tools.
 - Adaptive reasoning support for GPT-5.6-family model names.
 
+### `src/provider-scheduler.js`
+
+Coordinates provider concurrency/rate-limit behavior and exposes queue/retry timing used by diagnostics.
+
 ### `src/multi-agent-room.js`
 
-Core room lifecycle, turn-based scheduling, base context, common research/image-tool integration and shared debug metadata.
+Core room lifecycle, sequential loop, history/state, common research/image support and lower-level fallback behavior. Do not assume all active turn execution lives here: the server path is augmented by the layers/components below.
 
 ### `src/parallel-batch-room.js`
 
-Free-running parallel conversation behavior. The filename is legacy: current semantics are not a strict barrier batch.
+Free-running parallel conversation behavior. The filename is legacy: current semantics are not a strict barrier batch. Parallel scheduling decisions delegate to `TurnCoordinator`.
+
+### `src/turn-coordinator.js`
+
+Pure scheduling-decision component used for speaker selection, rotating parallel order, unseen-trigger checks, slot eligibility and completion decisions.
+
+### `src/context-assembler.js`
+
+Central context/message assembly component. It handles base agent messages, multimodal history representation, memory/private/scenario placement rules and context-budget application. It does not perform memory retrieval, web I/O or provider calls.
+
+### `src/agent-executor.js`
+
+Executes a prepared agent turn against the already-wrapped provider. It owns streaming events, provider-call diagnostics, usage merging, image-tool loops and cancellation/failure signaling. It does not own room scheduling, memory retrieval or research planning.
 
 ### `src/profiled-room.js`
 
@@ -140,7 +168,15 @@ Adds bounded long-term memory retrieval and asynchronous memory consolidation. P
 
 ### `src/reasoning-memory-room.js`
 
-Adds room-level reasoning mode control. `auto` uses adaptive reasoning; manual levels are strict and may be probed on providers where support cannot be verified directly.
+Adds room-level reasoning mode control and the active turn orchestration that combines context/research preparation with `AgentExecutor`. `auto` uses adaptive reasoning; manual levels are strict and may be probed on providers where support cannot be verified directly.
+
+### Scenario/game files
+
+- `src/scenario-room.js` - active top-level room and scenario integration.
+- `src/scenario.js` - deterministic scenario controller/contracts.
+- `src/werewolf-scenario.js` - Werewolf/Ma Sói rules/state machine.
+
+Scenario secret state must never enter the public transcript, public SSE snapshot or long-term memory consolidation.
 
 ### Memory files
 
@@ -164,11 +200,10 @@ Adds room-level reasoning mode control. `auto` uses adaptive reasoning; manual l
 
 - `src/room-manager.js`
 - `src/room-routing.js`
-- `src/resumable-room.js`
-- `src/conversation-end.js`
-- `src/orchestrator.js`
+- `src/scenario-room.js`
+- `src/conversation-end.js` - currently a standalone/dormant conversation-end utility, not part of the active server turn loop.
 
-Some files retain older compatibility paths/names. Verify whether a path is active before deleting or refactoring it.
+`src/orchestrator.js` and `src/resumable-room.js` were removed in Task 5 after active-path coverage replaced their legacy test consumers.
 
 ## 5. Frontend file map
 
@@ -176,13 +211,14 @@ Important files include:
 
 - `public/index.html` - main page shell.
 - `public/app.js` - primary frontend application logic.
-- `public/lab-v2.js` - v2 inspector/fork/persistence integration and legacy C/D UI extension.
+- `public/lab-v2.js` - v2 inspector/fork/persistence integration and some legacy UI extension code.
 - `public/six-agent-ui.js` - Agent E/F UI extension.
 - `public/agent-profiles.js` - per-agent profile controls.
 - `public/reasoning-control.js` - room reasoning mode control.
 - `public/parallel-stream-ui.js` - live parallel-agent status behavior.
 - `public/memory-inspector.js` - long-term memory inspector.
 - `public/private-context-inspector.js` - current-session private context inspector.
+- `public/profiler-ui.js` - turn/token/performance diagnostics.
 - `public/prompt-settings.js` / `public/prompt-ui.js` - prompt persistence/editing.
 - `public/control-settings.js` / `public/control-ui.js` - control-room behavior.
 - `public/history.js` - browser chat-history persistence.
@@ -191,6 +227,7 @@ Important files include:
 - `public/markdown.js` / `public/markdown-ui.js` - Markdown rendering.
 - `public/math-renderer.js` - math rendering integration.
 - `public/research-status.js` - research state/status UI.
+- `public/scenario-ui.js` - scenario selection/state UI.
 - `public/room-session.js` - client room/session behavior and module wiring.
 
 CSS is intentionally layered. Check load order in `public/index.html` before deleting or consolidating old-looking styles.
@@ -236,9 +273,17 @@ Transcript summarization is separate again: it is working-context compression, n
 
 Do not assume old round/barrier behavior. A free agent may start another response when new unseen relevant input appears without waiting for all other agents to finish. At most one response should be actively running per agent.
 
-The historical filename `parallel-batch-room.js` remains for compatibility.
+The historical filename `parallel-batch-room.js` remains for compatibility, but scheduling decisions are centralized in `TurnCoordinator`.
 
-## 9. Isolation invariants
+## 9. Resume/history semantics
+
+Normal historical conversation resume/fork runs through the active room continuation path and creates a new runtime `runId` rather than resurrecting the old run identity.
+
+If the historical transcript has already consumed its selected `maxTurns`, the caller must explicitly increase the cap before continuing. `ScenarioRoom.continueFromHistory` rejects an exhausted cap with `RESUME_TURN_LIMIT_REACHED`; this matches `public/history-resume.js` / UI behavior.
+
+Scenario sessions with secret state are currently not resumable/forkable because secret state is intentionally not persisted into public history.
+
+## 10. Isolation invariants
 
 When modifying runtime behavior, preserve these invariants:
 
@@ -248,9 +293,10 @@ When modifying runtime behavior, preserve these invariants:
 - Private context must not leak into long-term memory.
 - Deleted browser history must not be resurrected by later snapshots.
 - Exact token usage and estimated usage must remain distinguishable.
-- Stop/reset/abort must cancel active work according to current lifecycle semantics.
+- Stop/reset/abort must cancel active and queued work according to current lifecycle semantics.
+- Scenario/game secrets must not enter public transcript, public SSE state or long-term memory.
 
-## 10. Browser persistence
+## 11. Browser persistence
 
 Current concepts include:
 
@@ -260,7 +306,7 @@ Current concepts include:
 
 Startup order matters. Past bugs involved saved settings/history being overwritten during reload.
 
-## 11. Testing and CI
+## 12. Testing and CI
 
 GitHub Actions runs Node 22 and executes:
 
@@ -271,58 +317,62 @@ npm run check
 
 `npm run check` uses `scripts/check-js.mjs`, which recursively discovers JavaScript under `src/`, `public/` and `scripts/` instead of maintaining a manual file list.
 
-Regression coverage includes agent config/profiles, six-agent support, memory, private context, provider streaming/tools/vision/reasoning, parallel mode, web research, history/resume, prompt/settings persistence, images, Markdown/math and room/layout behavior.
+Regression coverage includes active runtime lifecycle, TurnCoordinator, ContextAssembler, AgentExecutor, agent config/profiles, six-agent support, memory, private context, provider streaming/tools/vision/reasoning/rate limits, parallel mode, scenarios, web research, history/resume, prompt/settings persistence, images, Markdown/math and room/layout behavior.
 
 Before merging behavior changes, both commands should pass in CI.
 
-## 12. Recent architecture history
+## 13. Recent architecture history
 
 Useful milestones reflected by the current codebase include:
 
-- multi-agent v2 foundation;
+- multi-agent v2 foundation and optional Agent E/F support;
 - free-running parallel conversation;
 - isolated private agent-to-agent context;
 - persistent per-agent long-term memory;
-- browser-history deletion/tombstone fixes;
-- reasoning-effort control and provider capability handling;
-- optional Agent E/F support, bringing the runtime to six slots.
+- token anatomy/performance profiling and context budgeting;
+- provider scheduler/rate-limit coordination;
+- deterministic scenario engine with Werewolf/Ma Sói;
+- Task 5 runtime cleanup: characterization tests, `TurnCoordinator`, `ContextAssembler`, `AgentExecutor`, active-path test migration and removal of the old `ConversationRoom` / `ResumableConversationRoom` runtimes.
 
-Some filenames/compatibility layers still reflect older implementations. Do not remove them based only on naming.
+The active inheritance chain still exists for profile/private-context, memory, reasoning and scenario responsibilities. Further flattening should only be attempted when it removes real coupling; do not create abstraction churn merely to reduce the number of arrows in a diagram.
 
-## 13. Snapshot
+## 14. Snapshot
 
 This handoff was refreshed on **2026-09-16** from `main` HEAD:
 
-- `39f2ee8f799c380914665d64ceaa73e4f6b75a71`
-- `Add optional Agent E/F support on shared ProxyLLM provider`
+- `cea71f3418d1e69a6ee91bcf4245393f9f3ba3ad`
+- `Task 5.5b: remove legacy conversation runtimes`
 
 The commit listed here is only a reference snapshot and will become stale as soon as later PRs merge. Always verify live HEAD and open PRs before changing code.
 
-## 14. Guidance for another AI assistant
+## 15. Guidance for another AI assistant
 
 1. Treat `giabao2605/AI-chat` as the intended project unless the user explicitly names another repo.
 2. Read current repository metadata and `main` HEAD first.
 3. Read only files relevant to the requested change, including tests for that subsystem.
 4. Do not trust this handoff when current code disagrees with it.
-5. Preserve isolation guarantees for rooms, agents, memory and private context.
+5. Preserve isolation guarantees for rooms, agents, memory, private context and scenario secrets.
 6. Preserve the lightweight Node-core architecture unless a feature clearly justifies a dependency.
 7. Do not commit secrets, `.env`, generated memory databases or credentials.
 8. Prefer regression tests for bug fixes and behavior changes.
 9. Verify `npm test` and `npm run check` before considering a code change complete.
 10. Prefer branch + PR for substantial changes.
 
-## 15. Quick routing guide
+## 16. Quick routing guide
 
 If the user asks about...
 
-- **Server/API/SSE:** `src/server.js`.
-- **Provider/model streaming/capabilities:** `src/provider.js`, `src/reasoning-memory-room.js`, `src/config.js`.
-- **Who speaks next / scheduling:** `src/multi-agent-room.js`, `src/parallel-batch-room.js`, then inspect `src/orchestrator.js` if the path is relevant.
+- **Server/API/SSE:** `src/server.js`, `src/scenario-room.js`.
+- **Who speaks next / scheduling:** `src/turn-coordinator.js`, `src/parallel-batch-room.js`, `src/multi-agent-room.js`.
+- **Context assembly / token budget:** `src/context-assembler.js`, then the profile/memory/scenario layer that contributes the relevant context.
+- **Provider execution / streaming / image-tool loop:** `src/agent-executor.js`, `src/reasoning-memory-room.js`, `src/provider.js`.
+- **Provider queue/rate limits:** `src/provider-scheduler.js`, `src/provider.js`.
 - **Profiles/private context:** `src/profiled-room.js`, `src/agent-tools.js`, relevant private-context tests.
 - **Long-term memory:** `src/agent-memory.js`, `src/memory-store.js`, `src/memory-profiled-room.js`.
 - **Web research:** `src/web-search.js`, `src/research.js`, `src/deep-research.js`.
-- **Images:** image tool/context files plus `public/image-tool-ui.js`.
-- **History/resume/fork:** `public/history.js`, `public/history-resume.js`, `public/lab-v2.js`, room continuation logic.
+- **Scenario/game rules:** `src/scenario-room.js`, `src/scenario.js`, `src/werewolf-scenario.js`.
+- **Images:** `src/agent-executor.js`, image tool/context files, `public/image-tool-ui.js`.
+- **History/resume/fork:** `src/scenario-room.js`, `src/multi-agent-room.js`, `public/history.js`, `public/history-resume.js`, `public/lab-v2.js`.
 - **UI layout/theme:** `public/index.html` and later-loaded CSS layers.
 - **Markdown/math:** `public/markdown.js`, `public/markdown-ui.js`, `public/math-renderer.js`.
 
