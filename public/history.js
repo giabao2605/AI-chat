@@ -43,6 +43,9 @@ export function createHistoryRecord(snapshot, savedAt = new Date().toISOString()
     maxTurns: Number(snapshot.maxTurns || 0),
     history: clone(snapshot.history),
     stats: clone(snapshot.stats || {}),
+    scenario: snapshot.scenario ? clone(snapshot.scenario) : null,
+    endedBy: snapshot.endedBy || null,
+    endReason: snapshot.endReason || '',
     savedAt,
   };
 }

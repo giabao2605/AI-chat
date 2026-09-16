@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="/chat-v4.css" />
   <link rel="stylesheet" href="/research-status.css" />
   <link rel="stylesheet" href="/lab-v2.css" />
+  <link rel="stylesheet" href="/scenario-ui.css" />
   <link rel="stylesheet" href="/sidebar-v3.css" />
   <link rel="stylesheet" href="/empty-state-v2.css" />
   <link rel="stylesheet" href="/modern-theme.css" />
@@ -27,6 +28,7 @@
             <p id="liveHint">Chưa bắt đầu phiên.</p>
             <div id="topicPreview" class="topic-inline">Chưa có chủ đề.</div>
             <div id="researchStatus" class="research-status hidden" aria-live="polite"></div>
+            <div id="scenarioStatus" class="scenario-status hidden" aria-live="polite"></div>
           </div>
           <div class="toolbar-actions"><button id="pauseBtn" class="button ghost" disabled>Tạm dừng</button><button id="stopBtn" class="button danger" disabled>Dừng</button></div>
         </div>
@@ -102,6 +104,7 @@
 
           <section class="control-section sidebar-primary" aria-labelledby="sessionSectionLabel">
             <div id="sessionSectionLabel" class="section-kicker">Thiết lập nhanh</div>
+            <label class="field"><span>Scenario</span><select id="scenarioMode"><option value="">Trò chuyện thường</option><option value="werewolf">Ma Sói</option></select><small id="scenarioHelp">Ma Sói dùng backend làm trọng tài deterministic; AI chỉ quyết định lời nói và hành động hợp lệ.</small></label>
             <label class="field"><span>Kiểu hội thoại</span><select id="conversationMode"><option value="turns">Theo lượt</option><option value="parallel">Tự do / song song</option></select></label>
             <label class="field"><span>Chế độ chủ đề</span><select id="topicMode"><option value="manual">Tôi chọn chủ đề</option><option value="auto">AI tự chọn chủ đề</option></select></label>
             <label id="topicField" class="field"><span>Chủ đề</span><textarea id="topic" rows="3" placeholder="Ví dụ: Nếu bốn AI phải cùng thiết kế một thành phố trên Sao Hỏa..."></textarea></label>
@@ -165,5 +168,6 @@
   <script type="module" src="/research-status.js"></script>
   <script type="module" src="/parallel-stream-ui.js"></script>
   <script type="module" src="/lab-v2.js"></script>
+  <script type="module" src="/scenario-ui.js"></script>
 </body>
 </html>
