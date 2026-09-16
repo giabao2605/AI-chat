@@ -41,14 +41,15 @@ test('seeded role assignment is deterministic for 4/5/6 agents', () => {
 
 test('public state never exposes role assignment or seer result', () => {
   const controller = game();
-  const serialized = JSON.stringify(controller.publicSnapshot());
+  assert.equal(controller.publicSnapshot().id, 'werewolf');
+  const serialized = JSON.stringify(controller.publicState());
   assert.equal(serialized.includes('werewolf'), false);
   assert.equal(serialized.includes('seer'), false);
   assert.equal(serialized.includes('doctor'), false);
 
   controller.applyAction('b', { type: 'seer_inspect', target: 'a' });
   assert.match(controller.privateContextFor('b'), /A = Ma Sói/);
-  assert.equal(JSON.stringify(controller.publicSnapshot()).includes('Ma Sói'), false);
+  assert.equal(JSON.stringify(controller.publicState()).includes('Ma Sói'), false);
 });
 
 test('night actions are role-gated and backend rejects invalid target/action pairs', () => {
