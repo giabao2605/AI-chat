@@ -20,7 +20,7 @@ test('drops old optional context before protected recent messages', () => {
   ];
 
   const result = applyContextBudget(messages, [], {
-    budgetTokens: 900,
+    budgetTokens: 650,
     safetyMargin: 0,
     minRecentMessages: 4,
   });
@@ -30,6 +30,7 @@ test('drops old optional context before protected recent messages', () => {
   assert.match(text, /Chủ đề của phòng/);
   for (const value of ['recent-1', 'recent-2', 'recent-3', 'recent-4']) assert.match(text, new RegExp(value));
   assert.ok(result.debug.dropped.some((item) => item.category === 'recentHistory'));
+  assert.ok(result.debug.afterEstimatedTokens <= result.debug.targetTokens);
   assert.equal(result.debug.enabled, true);
 });
 

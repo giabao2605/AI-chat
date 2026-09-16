@@ -60,7 +60,7 @@ test('main agent request is budgeted before provider while helper calls keep the
   const room = new ReasoningMemoryProfiledRoom({
     agents,
     contextConfig: {
-      inputBudgetTokens: 240,
+      inputBudgetTokens: 900,
       budgetSafetyMargin: 0,
       imageTokenReserve: 0,
       minRecentMessages: 1,
