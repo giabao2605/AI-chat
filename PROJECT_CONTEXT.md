@@ -8,8 +8,8 @@
 - Default branch: `main`
 - Project name: **AI Conversation Lab**
 - Primary purpose: a local web app where multiple AI agents can talk in one room while a human can observe or intervene.
-- Current runtime generation: multi-agent v2 with support for **2 to 4 agents**.
-- Agent A and B are required. Agent C and D are optional when fully configured.
+- Current runtime generation: multi-agent v2 with support for **2 to 6 agents**.
+- Agent A and B are required. Agent C, D, E and F are optional when fully configured.
 
 ## 2. Runtime and stack
 
@@ -43,49 +43,54 @@ http://127.0.0.1:3000
 
 The project currently includes:
 
-- 2-4 independently configured AI agents.
-- Per-agent model, API key, provider/base URL and display profile.
+- 2-6 independently configured AI agents.
+- Per-agent model/API key/base URL, with optional shared provider credentials.
 - Turn-based conversation mode.
 - Free-running parallel conversation mode.
 - Shared prompt plus per-agent prompt/profile/personality controls.
 - Private agent-to-agent context that does not enter the public transcript.
 - Per-agent persistent long-term memory.
-- Transcript compaction / context summarization.
-- Loop detection / steering guard.
+- Transcript compaction / context summarization with background refresh in the profiled runtime.
+- Loop detection / steering guard across all configured agents.
 - Tavily web research and optional deeper reading of top sources.
 - Image generation tools and image context passed back to capable models.
+- Auto/manual reasoning-effort control when supported by the provider/model.
 - Realtime SSE streaming and per-agent status.
 - Session history and resume.
 - Multi-room support with a feature flag.
 - Inspector/debug metadata.
 - Conversation forking.
-- Conversation presets such as debate, brainstorming, code review, fact-check and Socratic modes.
+- Conversation preset implementation; its UI is currently intentionally hidden.
 - IndexedDB + localStorage browser persistence.
 - Markdown rendering and math rendering.
 - Dark UI with a light-blue accent layer.
 
-## 4. Backend file map
+## 4. Active runtime shape
+
+The main server currently constructs `ReasoningMemoryProfiledRoom`. The active inheritance chain is approximately:
+
+```text
+MultiAgentRoom
+  -> ParallelBatchRoom
+    -> ProfiledRoom
+      -> MemoryProfiledRoom
+        -> ReasoningMemoryProfiledRoom
+```
+
+This is important when debugging provider calls or context assembly because multiple layers wrap/augment the same turn. Do not assume all behavior lives in `multi-agent-room.js`.
 
 ### `src/server.js`
 
-Main backend entrypoint.
-
-Responsibilities include:
-
-- Build the Node HTTP server.
-- Serve static frontend files from `public/`.
-- Create and manage rooms through `RoomManager`.
-- Wire SSE events to connected clients.
-- Build web-search, memory and image-tool services from config.
-- Expose the main HTTP API.
+Main backend entrypoint. It builds the Node HTTP server, room manager, SSE wiring, web search, memory and image services, then exposes the HTTP API.
 
 Important routes currently include:
 
 - `GET /api/health`
 - `GET /api/config`
 - `GET /api/state`
-- `POST /api/rooms`
 - `GET /api/events`
+- `GET /api/memory/inspect`
+- `POST /api/rooms`
 - `POST /api/start`
 - `POST /api/continue`
 - `POST /api/pause`
@@ -93,86 +98,60 @@ Important routes currently include:
 - `POST /api/stop`
 - `POST /api/reset`
 - `POST /api/message`
+- `POST /api/reasoning-mode`
+- `POST /api/memory/forget-runs`
+- `POST /api/memory/forget`
+- `POST /api/memory/clear-agent`
 - `POST /api/tools/image`
 
 ### `src/config.js`
 
-Central environment/config parser.
-
-Covers:
-
-- Agent A/B/C/D configuration.
-- Provider base URL and timeout.
-- Server host/port.
-- Multi-room settings.
-- Web search / Tavily settings.
-- Deep research settings.
-- Context summarization settings.
-- Long-term memory settings.
-- Image generation and model image-input settings.
-- Agent tool settings.
-- Public config returned to the frontend.
+Central environment/config parser. It covers Agent A-F configuration, shared provider credentials, server/multi-room settings, web/deep research, context summarization, memory, image generation/input and public frontend config.
 
 ### `src/provider.js`
 
-OpenAI-compatible provider layer.
+OpenAI-compatible streaming provider layer.
 
 Key behavior:
 
-- Uses `/chat/completions` style endpoints.
-- Supports streaming.
-- Normalizes tool calls.
-- Handles multimodal/image input when supported.
-- Falls back to text-only behavior when vision is rejected.
-- Tracks exact usage when the provider returns usage, otherwise estimates it.
-- Includes request timeout handling.
-- Includes a circuit breaker after repeated provider failures.
+- `/chat/completions` style endpoints.
+- Streaming text and tool-call deltas.
+- Multimodal/image input with text-only fallback when explicitly rejected.
+- Exact usage when returned by the provider, otherwise a marked estimate.
+- Request timeout and circuit breaker.
+- Capability cache/fallback for stream usage, prompt cache, reasoning, vision and tools.
+- Adaptive reasoning support for GPT-5.6-family model names.
 
 ### `src/multi-agent-room.js`
 
-Primary multi-agent runtime logic.
-
-Treat this as one of the main files to inspect for conversation scheduling, agent state and shared room behavior.
+Core room lifecycle, turn-based scheduling, base context, common research/image-tool integration and shared debug metadata.
 
 ### `src/parallel-batch-room.js`
 
-Parallel/free-running conversation implementation.
-
-The class/file name is partly legacy: current semantics are free-running rather than strict barrier batches. Do not infer behavior purely from the filename.
-
-### `src/orchestrator.js`
-
-Conversation orchestration and coordination logic. Inspect this when changing agent scheduling, context assembly, research/tool integration or turn behavior.
+Free-running parallel conversation behavior. The filename is legacy: current semantics are not a strict barrier batch.
 
 ### `src/profiled-room.js`
 
-Adds agent profile/prompt behavior on top of room execution.
+Adds per-agent profiles and private agent-to-agent context/tool behavior. Private context is session state and is visible only to the sender/recipient pair.
 
 ### `src/memory-profiled-room.js`
 
-Integrates long-term memory with profiled multi-agent rooms.
+Adds bounded long-term memory retrieval and asynchronous memory consolidation. Private context must **not** be promoted automatically into long-term SQLite memory.
 
-### `src/memory-store.js`
+### `src/reasoning-memory-room.js`
 
-SQLite-backed persistent memory store.
+Adds room-level reasoning mode control. `auto` uses adaptive reasoning; manual levels are strict and may be probed on providers where support cannot be verified directly.
 
-### `src/agent-memory.js`
+### Memory files
 
-Per-agent long-term memory manager, including retrieval and consolidation logic.
+- `src/memory-store.js` - SQLite-backed persistent store.
+- `src/agent-memory.js` - retrieval, consolidation and memory policy.
 
-Memory is intended to remain isolated by agent unless config says otherwise.
+### Research files
 
-### `src/web-search.js`
-
-Tavily search client and search-related utilities.
-
-### `src/research.js`
-
-Research planning / aggregation logic.
-
-### `src/deep-research.js`
-
-Optional deeper reading of selected sources. Web content should be treated as untrusted evidence, not as system instructions.
+- `src/web-search.js` - Tavily client.
+- `src/research.js` - research decision/planning.
+- `src/deep-research.js` - optional deeper reading of selected sources. Web content is untrusted evidence, not system instruction.
 
 ### Image/tool files
 
@@ -181,29 +160,30 @@ Optional deeper reading of selected sources. Web content should be treated as un
 - `src/cloudflare-image-tool.js`
 - `src/image-context.js`
 
-These cover native agent tools, image generation providers and feeding images back into model context.
-
 ### Room/session support
 
 - `src/room-manager.js`
 - `src/room-routing.js`
 - `src/resumable-room.js`
 - `src/conversation-end.js`
+- `src/orchestrator.js`
 
-Inspect these for room lifecycle, room IDs, resume behavior and end-of-conversation logic.
+Some files retain older compatibility paths/names. Verify whether a path is active before deleting or refactoring it.
 
 ## 5. Frontend file map
-
-Frontend code lives in `public/`.
 
 Important files include:
 
 - `public/index.html` - main page shell.
 - `public/app.js` - primary frontend application logic.
-- `public/lab-v2.js` - v2 runtime/UI integration.
+- `public/lab-v2.js` - v2 inspector/fork/persistence integration and legacy C/D UI extension.
+- `public/six-agent-ui.js` - Agent E/F UI extension.
 - `public/agent-profiles.js` - per-agent profile controls.
-- `public/parallel-stream-ui.js` - live parallel-agent UI/status behavior.
-- `public/prompt-settings.js` / `public/prompt-ui.js` - prompt persistence and editing.
+- `public/reasoning-control.js` - room reasoning mode control.
+- `public/parallel-stream-ui.js` - live parallel-agent status behavior.
+- `public/memory-inspector.js` - long-term memory inspector.
+- `public/private-context-inspector.js` - current-session private context inspector.
+- `public/prompt-settings.js` / `public/prompt-ui.js` - prompt persistence/editing.
 - `public/control-settings.js` / `public/control-ui.js` - control-room behavior.
 - `public/history.js` - browser chat-history persistence.
 - `public/history-resume.js` / `public/history-resume-ui.js` - history restore/resume.
@@ -211,190 +191,140 @@ Important files include:
 - `public/markdown.js` / `public/markdown-ui.js` - Markdown rendering.
 - `public/math-renderer.js` - math rendering integration.
 - `public/research-status.js` - research state/status UI.
-- `public/room-session.js` - client room/session behavior.
+- `public/room-session.js` - client room/session behavior and module wiring.
 
-Relevant CSS layers include:
-
-- `public/styles.css`
-- `public/ui-v3.css`
-- `public/sidebar-v3.css`
-- `public/layout-v2.css`
-- `public/lab-v2.css`
-- `public/modern-theme.css`
-- `public/light-blue-theme.css`
-- `public/chat-v4.css`
-- `public/parallel-stream-ui.css`
-- `public/image-tool.css`
-- `public/markdown.css`
-
-Several CSS files intentionally layer on top of older styles instead of rewriting everything. Check load order in `index.html` before deleting or consolidating styles.
+CSS is intentionally layered. Check load order in `public/index.html` before deleting or consolidating old-looking styles.
 
 ## 6. Configuration baseline
 
 See `.env.example` for the current public example.
 
-At the time this handoff file was created, the public example used approximately this shape:
+Current shape includes:
 
-- Provider example: `https://api.proxyllm.eu/v1`
-- Four example agents using `gpt-5.6-luna`
-- `MULTI_ROOM_ENABLED=false`
-- Tavily web search enabled when a key is present.
-- Deep web research enabled.
-- Agent memory enabled.
-- Default memory DB: `./data/agent-memory.sqlite`
-- Default memory scope: `agent`
-- Image provider example: Cloudflare.
-- Image generation itself disabled by default.
+- Shared provider example: `https://api.proxyllm.eu/v1`.
+- Optional shared `PROVIDER_API_KEY`; per-agent key/base URL can override it.
+- Six A-F agent slots using `gpt-5.6-luna` in the example.
+- `MULTI_ROOM_ENABLED=false` by default.
+- Tavily web search/deep research config.
+- Agent memory enabled with DB `./data/agent-memory.sqlite` and default scope `agent`.
+- Cloudflare image provider example; image generation disabled until credentials/config enable it.
 - Model image input enabled by default.
-- Agent image tool enabled when image generation is actually configured.
 
 Never commit real API keys, Cloudflare credentials, local memory databases or `.env`.
 
-## 7. Memory model
+## 7. Memory and private-context model
 
-The current long-term memory design is intentionally simple and isolated.
+Long-term memory and private context are deliberately different systems.
 
-Important concepts:
+Long-term memory:
 
-- Persistent per-agent memory.
-- SQLite storage.
-- Memory retrieval is bounded instead of loading the entire store.
-- Memory can be scoped by agent or room depending on config.
-- Private context can be persisted without exposing it to unrelated agents.
-- Long-term consolidation is separated from normal visible transcript context.
-- Transcript summarization is short-term/working context, not the same thing as persistent memory.
+- persists in SQLite;
+- is bounded/retrieved by relevance instead of loading the whole store;
+- can be scoped by agent or room;
+- is consolidated asynchronously in batches.
 
-When changing memory behavior, inspect both:
+Private context:
 
-- `src/agent-memory.js`
-- `src/memory-store.js`
-- `src/memory-profiled-room.js`
+- is current-session state between the exact sender/recipient pair;
+- does not enter the public transcript;
+- can be restored as part of a resumable session snapshot;
+- is not automatically promoted into long-term SQLite memory.
 
-Also run the memory-related regression tests.
+Transcript summarization is separate again: it is working-context compression, not long-term memory.
 
 ## 8. Parallel conversation semantics
 
-Do not assume old round/barrier behavior.
+Do not assume old round/barrier behavior. A free agent may start another response when new unseen relevant input appears without waiting for all other agents to finish. At most one response should be actively running per agent.
 
-The newer parallel mode is designed so that agents can run independently. A free agent may start another response when new unseen input appears, without waiting for all other agents to finish first. At most one response should be actively running per agent.
+The historical filename `parallel-batch-room.js` remains for compatibility.
 
-The historical filename `parallel-batch-room.js` remains for compatibility, but the implementation evolved beyond literal batch rounds.
+## 9. Isolation invariants
 
-## 9. Private context model
+When modifying runtime behavior, preserve these invariants:
 
-Agents can send private context to selected other agents.
-
-Security/isolation intent:
-
-- Private content must not enter the shared/public transcript.
-- Unrelated agents must not receive private content in their model payload.
-- Public/debug metadata should not expose secret contents.
-- Resume/persistence should preserve intended private state.
-
-When touching this area, inspect private-context regression tests before modifying behavior.
+- No API key/credential in public config, SSE state or debug UI.
+- Multi-room instances must not cross-talk.
+- Private context must only reach the intended pair.
+- Private context must not leak into long-term memory.
+- Deleted browser history must not be resurrected by later snapshots.
+- Exact token usage and estimated usage must remain distinguishable.
+- Stop/reset/abort must cancel active work according to current lifecycle semantics.
 
 ## 10. Browser persistence
 
-The frontend uses browser persistence for several user-facing features.
-
 Current concepts include:
 
-- localStorage for lightweight UI/session settings and chat history.
-- IndexedDB as a larger snapshot/persistence layer for v2 rooms.
-- Tombstones for deleted browser history so deleted conversations are not resurrected by later state snapshots or resume logic.
+- localStorage for lightweight UI/session settings and chat history;
+- IndexedDB for larger v2 room snapshots/backups;
+- tombstones for deleted browser history so deleted conversations are not resurrected.
 
-Be careful with startup order and persistence races. Several past bugs involved saved settings/history being overwritten during reload.
+Startup order matters. Past bugs involved saved settings/history being overwritten during reload.
 
 ## 11. Testing and CI
 
-GitHub Actions workflow:
-
-```text
-.github/workflows/ci.yml
-```
-
-Current CI runs on Node 22 and executes:
+GitHub Actions runs Node 22 and executes:
 
 ```bash
 npm test
 npm run check
 ```
 
-The `test/` directory contains broad regression coverage for backend and frontend utilities, including areas such as:
+`npm run check` uses `scripts/check-js.mjs`, which recursively discovers JavaScript under `src/`, `public/` and `scripts/` instead of maintaining a manual file list.
 
-- agent config and profiles
-- memory
-- private context
-- provider streaming/tools/vision
-- orchestration
-- parallel mode
-- web research
-- history and resume
-- prompt/settings persistence
-- image generation/context/UI
-- Markdown/math rendering
-- room flags and layout behavior
+Regression coverage includes agent config/profiles, six-agent support, memory, private context, provider streaming/tools/vision/reasoning, parallel mode, web research, history/resume, prompt/settings persistence, images, Markdown/math and room/layout behavior.
 
-Before merging changes, run both `npm test` and `npm run check` unless the task explicitly cannot be executed locally.
+Before merging behavior changes, both commands should pass in CI.
 
 ## 12. Recent architecture history
 
-Important merged milestones immediately before this handoff was created:
+Useful milestones reflected by the current codebase include:
 
-- PR #26: multi-agent v2 foundation.
-- PR #37: free-running parallel conversation behavior.
-- PR #39: isolated private agent-to-agent context.
-- PR #40 / #41: modern dark visual refresh and light-blue accent.
-- PR #42: reorganized four-agent Luna `.env.example`.
-- PR #44: persistent per-agent long-term memory foundation.
-- PR #45: fixed deleted browser chat history reappearing.
+- multi-agent v2 foundation;
+- free-running parallel conversation;
+- isolated private agent-to-agent context;
+- persistent per-agent long-term memory;
+- browser-history deletion/tombstone fixes;
+- reasoning-effort control and provider capability handling;
+- optional Agent E/F support, bringing the runtime to six slots.
 
-This history matters because some filenames and compatibility layers reflect older implementations.
+Some filenames/compatibility layers still reflect older implementations. Do not remove them based only on naming.
 
-## 13. Snapshot at handoff creation
+## 13. Snapshot
 
-Handoff created on **2026-09-15**.
+This handoff was refreshed on **2026-09-16** from `main` HEAD:
 
-At that time:
+- `39f2ee8f799c380914665d64ceaa73e4f6b75a71`
+- `Add optional Agent E/F support on shared ProxyLLM provider`
 
-- `main` HEAD: `e6b0981f23c38bb4ed86d79c9de8b04ad4aeff66`
-- Commit title: `Fix deleted chat history reappearing`
-- The GitHub Actions CI run for that HEAD completed successfully.
-- No open pull request was found in the checked repository state.
-- No open issue was found in the checked repository state.
-
-This snapshot will become stale. Always verify current HEAD, open PRs/issues and relevant files before making a new change.
+The commit listed here is only a reference snapshot and will become stale as soon as later PRs merge. Always verify live HEAD and open PRs before changing code.
 
 ## 14. Guidance for another AI assistant
 
-When a user asks you to work on this repo:
-
 1. Treat `giabao2605/AI-chat` as the intended project unless the user explicitly names another repo.
-2. Read the current repository metadata and `main` HEAD first.
-3. Read only the files relevant to the requested change, but include tests for that subsystem.
-4. Do not trust this handoff blindly if current code disagrees with it.
-5. Preserve existing isolation guarantees for rooms, agents, memory and private context.
-6. Preserve the lightweight Node-core architecture unless the requested feature clearly justifies a new dependency.
+2. Read current repository metadata and `main` HEAD first.
+3. Read only files relevant to the requested change, including tests for that subsystem.
+4. Do not trust this handoff when current code disagrees with it.
+5. Preserve isolation guarantees for rooms, agents, memory and private context.
+6. Preserve the lightweight Node-core architecture unless a feature clearly justifies a dependency.
 7. Do not commit secrets, `.env`, generated memory databases or credentials.
-8. Prefer adding/updating regression tests for bug fixes and behavior changes.
-9. Run or verify `npm test` and `npm run check` before considering a code change complete.
-10. For GitHub mutations, prefer a branch + PR for substantial changes unless the user explicitly asks for a direct change on `main`.
+8. Prefer regression tests for bug fixes and behavior changes.
+9. Verify `npm test` and `npm run check` before considering a code change complete.
+10. Prefer branch + PR for substantial changes.
 
 ## 15. Quick routing guide
 
 If the user asks about...
 
-- **Server/API/SSE:** start with `src/server.js`.
-- **Agent/provider/model streaming:** start with `src/provider.js` and `src/config.js`.
-- **Who speaks next / scheduling:** inspect `src/multi-agent-room.js`, `src/orchestrator.js`, `src/parallel-batch-room.js`.
-- **Agent profiles/prompts:** inspect `src/profiled-room.js`, `public/agent-profiles.js`, prompt UI files.
-- **Long-term memory:** inspect `src/agent-memory.js`, `src/memory-store.js`, `src/memory-profiled-room.js`.
-- **Private agent messages:** inspect multi-agent/profiled room logic and `test/private-context-room.test.js`.
-- **Web research:** inspect `src/web-search.js`, `src/research.js`, `src/deep-research.js`.
-- **Images:** inspect image-tool/context files plus `public/image-tool-ui.js`.
-- **History/resume:** inspect `public/history.js`, `public/history-resume.js`, room resume logic.
-- **UI layout/theme:** inspect `public/index.html` and the later-loaded CSS layers before editing base CSS.
-- **Markdown/math rendering:** inspect `public/markdown.js`, `public/markdown-ui.js`, `public/math-renderer.js`.
+- **Server/API/SSE:** `src/server.js`.
+- **Provider/model streaming/capabilities:** `src/provider.js`, `src/reasoning-memory-room.js`, `src/config.js`.
+- **Who speaks next / scheduling:** `src/multi-agent-room.js`, `src/parallel-batch-room.js`, then inspect `src/orchestrator.js` if the path is relevant.
+- **Profiles/private context:** `src/profiled-room.js`, `src/agent-tools.js`, relevant private-context tests.
+- **Long-term memory:** `src/agent-memory.js`, `src/memory-store.js`, `src/memory-profiled-room.js`.
+- **Web research:** `src/web-search.js`, `src/research.js`, `src/deep-research.js`.
+- **Images:** image tool/context files plus `public/image-tool-ui.js`.
+- **History/resume/fork:** `public/history.js`, `public/history-resume.js`, `public/lab-v2.js`, room continuation logic.
+- **UI layout/theme:** `public/index.html` and later-loaded CSS layers.
+- **Markdown/math:** `public/markdown.js`, `public/markdown-ui.js`, `public/math-renderer.js`.
 
 ---
 
