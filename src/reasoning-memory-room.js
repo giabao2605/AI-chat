@@ -1,4 +1,3 @@
-import { applyContextBudget } from './context-budget.js';
 import { MemoryProfiledRoom } from './memory-profiled-room.js';
 import { finalizeProviderInputProfile, profileProviderInput } from './request-metrics.js';
 
@@ -48,6 +47,7 @@ export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
       minRecentMessages: Math.max(1, Number(contextConfig.minRecentMessages) || 4),
       agentBudgets: contextConfig.agentBudgets && typeof contextConfig.agentBudgets === 'object' ? { ...contextConfig.agentBudgets } : {},
     };
+    this.contextAssembler.setBudgetConfig(this.contextBudgetConfig);
 
     const baseProviderFactory = this.providerFactory;
     this.reasoningBaseProviderFactory = baseProviderFactory;
@@ -71,13 +71,7 @@ export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
 
         let contextBudget = null;
         if (isMainAgentTurn) {
-          const budgetTokens = Math.max(0, Number(this.contextBudgetConfig.agentBudgets?.[agentId]) || this.contextBudgetConfig.budgetTokens || 0);
-          const budgeted = applyContextBudget(effectiveRequest.messages, effectiveRequest.tools, {
-            budgetTokens,
-            safetyMargin: this.contextBudgetConfig.safetyMargin,
-            imageTokenReserve: this.contextBudgetConfig.imageTokenReserve,
-            minRecentMessages: this.contextBudgetConfig.minRecentMessages,
-          });
+          const budgeted = this.contextAssembler.applyBudget(effectiveRequest.messages, effectiveRequest.tools, { agentId });
           effectiveRequest = { ...effectiveRequest, messages: budgeted.messages };
           contextBudget = budgeted.debug;
         }
