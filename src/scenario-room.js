@@ -119,27 +119,34 @@ export class ScenarioRoom extends ReasoningMemoryProfiledRoom {
   }
 
   firstSpeaker() {
-    if (!this.scenarioController) return super.firstSpeaker();
-    const eligible = this.scenarioController.eligibleSpeakers();
-    if (!eligible.length) throw new Error(`Scenario phase '${this.scenarioController.phase}' không có agent hợp lệ để chạy.`);
-    const requested = this.settings?.startSpeaker;
-    if (requested && requested !== 'random' && eligible.includes(requested)) return requested;
-    return eligible[0];
+    const scenario = this.scenarioController;
+    const eligible = scenario ? scenario.eligibleSpeakers() : this.agentIds;
+    if (!eligible.length) {
+      if (scenario?.isComplete?.()) return this.agentIds[0] || 'a';
+      if (scenario) throw new Error(`Scenario phase '${scenario.phase}' không có agent hợp lệ để chạy.`);
+      return super.firstSpeaker();
+    }
+    return this.turnCoordinator?.firstSpeaker({
+      baseOrder: this.agentIds,
+      eligibleIds: eligible,
+      requested: this.settings?.startSpeaker || 'random',
+      randomize: !scenario,
+    }) || super.firstSpeaker();
   }
 
   nextSpeaker(current) {
-    if (!this.scenarioController) return super.nextSpeaker(current);
-    const eligible = this.scenarioController.eligibleSpeakers();
+    const scenario = this.scenarioController;
+    const eligible = scenario ? scenario.eligibleSpeakers() : this.agentIds;
     if (!eligible.length) {
-      if (this.scenarioController.isComplete()) return current;
-      throw new Error(`Scenario phase '${this.scenarioController.phase}' không có agent hợp lệ để chạy.`);
+      if (scenario?.isComplete?.()) return current;
+      if (scenario) throw new Error(`Scenario phase '${scenario.phase}' không có agent hợp lệ để chạy.`);
+      return super.nextSpeaker(current);
     }
-    const currentIndex = this.agentIds.indexOf(current);
-    for (let offset = 1; offset <= this.agentIds.length; offset += 1) {
-      const id = this.agentIds[(Math.max(-1, currentIndex) + offset) % this.agentIds.length];
-      if (eligible.includes(id)) return id;
-    }
-    return eligible[0];
+    return this.turnCoordinator?.nextSpeaker({
+      baseOrder: this.agentIds,
+      eligibleIds: eligible,
+      current,
+    }) || super.nextSpeaker(current);
   }
 
   injectScenarioContext(agentId, messages) {
