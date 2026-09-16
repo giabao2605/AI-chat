@@ -4,6 +4,7 @@ import {
   PRIVATE_CONTEXT_TOOL_NAME,
   parsePrivateContextToolCall,
 } from './agent-tools.js';
+import { ContextAssembler } from './context-assembler.js';
 import { ParallelBatchRoom } from './parallel-batch-room.js';
 
 function clamp(value, min, max, fallback) {
@@ -91,19 +92,10 @@ function sanitizePrivateContexts(value, agentIds = []) {
   }).filter(Boolean);
 }
 
-function insertLateContextMessage(messages, content) {
-  if (!content) return Array.isArray(messages) ? messages : [];
-  const next = Array.isArray(messages) ? [...messages] : [];
-  let firstNonSystem = 0;
-  while (firstNonSystem < next.length && next[firstNonSystem]?.role === 'system') firstNonSystem += 1;
-  const index = next.length > firstNonSystem ? Math.max(firstNonSystem, next.length - 1) : next.length;
-  next.splice(index, 0, { role: 'user', content });
-  return next;
-}
-
 export class ProfiledRoom extends ParallelBatchRoom {
   constructor(options = {}) {
     super(options);
+    this.contextAssembler = this.contextAssembler instanceof ContextAssembler ? this.contextAssembler : new ContextAssembler();
     this.agentConfigs = Object.fromEntries(Object.entries(this.agentConfigs).map(([id, agent]) => [id, { ...agent }]));
     this.baseAgentNames = Object.fromEntries(Object.entries(this.agentConfigs).map(([id, agent]) => [id, agent.name]));
     this.agentProfiles = {};
@@ -308,7 +300,7 @@ export class ProfiledRoom extends ParallelBatchRoom {
       const used = this.privateToolCallsUsed[agentId] || 0;
       const canUsePrivateTool = Boolean(privateTool && used < maxMessages && privateRounds < maxRounds);
       const privateBlock = this.privateContextDataBlock(agentId);
-      const messages = insertLateContextMessage(workingMessages, privateBlock);
+      const messages = this.contextAssembler.addPrivateContext(workingMessages, privateBlock);
       const baseTools = Array.isArray(options.tools)
         ? options.tools.filter((tool) => tool?.function?.name !== PRIVATE_CONTEXT_TOOL_NAME)
         : [];
