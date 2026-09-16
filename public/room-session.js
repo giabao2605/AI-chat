@@ -1,6 +1,7 @@
 import { readAgentProfiles } from './agent-profiles.js';
 import './memory-inspector.js';
 import './private-context-inspector.js';
+import './profiler-ui.js';
 import './header-toolbar-layout.js';
 import './reasoning-control.js';
 import './six-agent-ui.js';
