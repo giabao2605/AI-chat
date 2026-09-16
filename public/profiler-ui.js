@@ -42,8 +42,15 @@ function profilerText(payload) {
   ];
 
   if (lastCall) {
+    lines.push(`Provider queue: ${ms(lastCall.queueMs)}${lastCall.poolConcurrencyAtAcquire == null ? '' : ` · concurrency ${lastCall.poolConcurrencyAtAcquire}`}`);
     lines.push(`Last headers: ${ms(lastCall.finalHeadersMs)}`);
     lines.push(`Last first text: ${ms(lastCall.firstTextMs)}`);
+    if (Number(lastCall.rateLimitRetries) > 0 || Number(lastCall.retryWaitMs) > 0) {
+      const sources = Array.isArray(lastCall.retryAfterSources) && lastCall.retryAfterSources.length
+        ? ` · ${lastCall.retryAfterSources.join(', ')}`
+        : '';
+      lines.push(`Rate-limit retries: ${Number(lastCall.rateLimitRetries) || 0} · waited ${ms(lastCall.retryWaitMs)}${sources}`);
+    }
   }
   if (debug.research?.ms) lines.push(`Research: ${ms(debug.research.ms)}`);
   if (debug.summary?.ms) lines.push(`Summary: ${ms(debug.summary.ms)}`);
