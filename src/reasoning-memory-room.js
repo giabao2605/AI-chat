@@ -1,4 +1,5 @@
 import { MemoryProfiledRoom } from './memory-profiled-room.js';
+import { finalizeProviderInputProfile, profileProviderInput } from './request-metrics.js';
 
 const REASONING_MODES = new Set(['auto', 'low', 'medium', 'high', 'xhigh', 'max']);
 const MANUAL_REASONING_MODES = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -53,22 +54,28 @@ export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
         const isMainAgentTurn = isMainAgentProvider
           && this.profileTurnActive?.has(agentId)
           && !this.profileOverrideSuppressed?.has(agentId);
-
-        if (!manualMode || !isMainAgentTurn) return streamChat(request);
-
-        const result = await streamChat({
+        const effectiveRequest = manualMode && isMainAgentTurn ? {
           ...request,
           reasoningEffort: manualMode,
           adaptiveReasoning: false,
-        });
+        } : request;
+        const inputProfile = profileProviderInput(effectiveRequest.messages, effectiveRequest.tools);
+        const result = await streamChat(effectiveRequest);
+        const profiledResult = {
+          ...result,
+          diagnostics: {
+            ...(result?.diagnostics || {}),
+            inputProfile: finalizeProviderInputProfile(inputProfile, result?.usage),
+          },
+        };
 
-        if (result?.diagnostics?.reasoningEffort !== manualMode) {
+        if (manualMode && isMainAgentTurn && profiledResult?.diagnostics?.reasoningEffort !== manualMode) {
           throw unsupportedReasoningError(
             manualMode,
             'Provider đã trả response nhưng không xác nhận request cuối cùng dùng đúng reasoning_effort đã chọn.',
           );
         }
-        return result;
+        return profiledResult;
       };
       return provider;
     };
