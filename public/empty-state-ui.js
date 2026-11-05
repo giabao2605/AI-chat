@@ -8,12 +8,11 @@ const TEMPLATE_TOPICS = {
 
 const EMPTY_MARKUP = `
   <div class="empty-state-inner">
-    <div class="empty-kicker">Sẵn sàng</div>
     <h2>Bắt đầu cuộc trò chuyện</h2>
     <p class="empty-description">Đặt câu hỏi, trò chuyện, khám phá ý tưởng mới.</p>
     <div class="empty-actions">
       <button class="empty-action primary" type="button" data-empty-action="auto-topic" data-default-label="Để AI tự chọn chủ đề">
-        <span data-empty-label>Để AI tự chọn chủ đề</span><span class="empty-arrow" aria-hidden="true">→</span>
+        <span data-empty-label>Để AI tự chọn chủ đề</span>
       </button>
       <button class="empty-action" type="button" data-empty-action="settings">Mở thiết lập</button>
     </div>

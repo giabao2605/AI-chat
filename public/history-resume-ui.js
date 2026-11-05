@@ -108,9 +108,6 @@ if (historyList && banner && returnLiveBtn && maxTurnsInput && roomStatus) {
           startSpeaker: $('startSpeaker')?.value || 'a',
           temperature: Number($('temperature')?.value),
           maxOutputTokens: Number($('maxOutputTokens')?.value),
-          sharedPrompt: $('sharedPrompt')?.value || '',
-          personaA: $('personaA')?.value || '',
-          personaB: $('personaB')?.value || '',
         }),
       });
       const data = await response.json().catch(() => ({}));

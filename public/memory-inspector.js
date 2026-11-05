@@ -22,11 +22,11 @@ function mountInspector() {
       <aside id="memoryInspectorDrawer" class="memory-inspector-drawer" aria-hidden="true">
         <div class="memory-inspector-header">
           <div>
-            <div class="eyebrow">MEMORY INSPECTOR</div>
+
             <h2>Ký ức dài hạn</h2>
             <p>Chỉ hiển thị memory được chọn lọc để dùng xuyên phiên. Private Context của phiên hiện tại nằm ở inspector riêng.</p>
           </div>
-          <button id="closeMemoryInspectorBtn" class="icon-button" type="button" title="Đóng">×</button>
+          <button id="closeMemoryInspectorBtn" class="icon-button" type="button" title="Đóng">Đóng</button>
         </div>
         <div class="memory-inspector-toolbar">
           <label><span>Agent</span><select id="memoryInspectorAgent"></select></label>

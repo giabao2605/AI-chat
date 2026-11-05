@@ -19,7 +19,7 @@ const els = {
   agentAEstimate: $('agentAEstimate'), agentBEstimate: $('agentBEstimate'), combinedTotal: $('combinedTotal'), turnCounter: $('turnCounter'), topicPreview: $('topicPreview'),
   liveHint: $('liveHint'), pauseBtn: $('pauseBtn'), stopBtn: $('stopBtn'), resetBtn: $('resetBtn'), startBtn: $('startBtn'),
   conversationMode: $('conversationMode'), topicMode: $('topicMode'), topicField: $('topicField'), topic: $('topic'), maxTurns: $('maxTurns'), startSpeaker: $('startSpeaker'), temperature: $('temperature'), maxOutputTokens: $('maxOutputTokens'), autoStart: $('autoStart'),
-  sharedPrompt: $('sharedPrompt'), personaA: $('personaA'), personaB: $('personaB'), configWarning: $('configWarning'),
+  configWarning: $('configWarning'),
   userForm: $('userForm'), userInput: $('userInput'), sendBtn: $('sendBtn'), toast: $('toast'),
   historyBtn: $('historyBtn'), historyCount: $('historyCount'), historyDrawer: $('historyDrawer'), historyBackdrop: $('historyBackdrop'), closeHistoryBtn: $('closeHistoryBtn'), historyList: $('historyList'), clearHistoryBtn: $('clearHistoryBtn'),
   historyViewBanner: $('historyViewBanner'), historyViewTopic: $('historyViewTopic'), returnLiveBtn: $('returnLiveBtn'),
@@ -252,7 +252,7 @@ function renderHistoryList() {
     deleteButton.className = 'history-delete';
     deleteButton.type = 'button';
     deleteButton.title = 'Xóa phiên này';
-    deleteButton.textContent = '×';
+    deleteButton.textContent = 'Xóa';
     deleteButton.addEventListener('click', (event) => {
       event.stopPropagation();
       suppressHistoryRuns([session.runId]);
@@ -342,6 +342,7 @@ function applyState(next, { history = false } = {}) {
   state = next;
   saveCurrentSnapshot(next);
   els.roomStatus.textContent = next.status;
+  els.roomStatus.dataset.status = next.status;
   const active = ['starting', 'running', 'paused', 'pausing'].includes(next.status);
   const running = next.status === 'running' || next.status === 'pausing';
   const paused = next.status === 'paused';
@@ -387,7 +388,6 @@ async function load() {
   els.agentBName.textContent = config.agents.b.name;
   els.agentAModel.textContent = config.agents.a.model || 'chưa cấu hình';
   els.agentBModel.textContent = config.agents.b.model || 'chưa cấu hình';
-  els.sharedPrompt.value = config.defaults.sharedPrompt;
   if (els.conversationMode) els.conversationMode.value = config.defaults.conversationMode || 'turns';
   els.maxTurns.value = config.defaults.maxTurns;
   els.temperature.value = config.defaults.temperature;
@@ -476,9 +476,6 @@ function buildStartPayload(topicMode, topic) {
     startSpeaker: els.startSpeaker.value,
     temperature: Number(els.temperature.value),
     maxOutputTokens: Number(els.maxOutputTokens.value),
-    sharedPrompt: els.sharedPrompt.value,
-    personaA: els.personaA.value,
-    personaB: els.personaB.value,
   };
 }
 

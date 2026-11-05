@@ -143,11 +143,11 @@ test('six-agent UI and markdown surfaces include E/F', async () => {
     readFile(new URL('../public/lab-v2.js', import.meta.url), 'utf8'),
   ]);
   assert.match(session, /six-agent-ui\.js/);
-  assert.match(session, /'c', 'd', 'e', 'f'/);
   assert.match(extension, /\['e', 'f'\]/);
   assert.match(extension, /agent\$\{upper\}Total/);
   assert.match(markdown, /\.message\.e \.bubble/);
   assert.match(markdown, /\.message\.f \.bubble/);
   assert.match(lab, /countHistoryAiTurns\(history\)/);
-  assert.match(lab, /config\?\.agentSlots/);
+  assert.match(lab, /createExtraAgentCard\(id, agent\)/);
+  assert.match(lab, /startSpeaker\.append\(option\)/);
 });

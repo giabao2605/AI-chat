@@ -1,4 +1,3 @@
-import { readAgentProfiles } from './agent-profiles.js';
 import './memory-inspector.js';
 import './private-context-inspector.js';
 import './profiler-ui.js';
@@ -7,11 +6,9 @@ import './reasoning-control.js';
 import './six-agent-ui.js';
 
 const ROOM_KEY = 'ai-chat-room-id-v2';
-const EXTRA_PERSONAS_KEY = 'ai-chat-extra-personas-v1';
 const HISTORY_KEY = 'ai-chat-history-v1';
 const DB_NAME = 'ai-chat-lab-v2';
 const DB_VERSION = 1;
-const OPTIONAL_AGENT_IDS = ['c', 'd', 'e', 'f'];
 
 function makeRoomId() {
   const raw = globalThis.crypto?.randomUUID?.().replace(/-/g, '') || `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -68,30 +65,11 @@ function appendRoom(value) {
   return value;
 }
 
-function readExtraPersonas() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(EXTRA_PERSONAS_KEY) || '{}');
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
 function augmentBody(input, init = {}) {
   const path = typeof input === 'string' ? input : input?.url;
   if (!path || !/\/api\/(?:start|continue)(?:\?|$)/.test(path) || typeof init.body !== 'string') return init;
   try {
     const body = JSON.parse(init.body);
-    const extra = readExtraPersonas();
-    body.personas = body.personas && typeof body.personas === 'object' ? { ...body.personas } : {};
-    for (const id of OPTIONAL_AGENT_IDS) {
-      const upper = id.toUpperCase();
-      const persona = document.getElementById(`persona${upper}`)?.value ?? extra[id] ?? '';
-      body[`persona${upper}`] = persona;
-      body.personas[id] = persona;
-    }
-    body.agentProfiles = readAgentProfiles();
-
     if (/\/api\/start(?:\?|$)/.test(path)) {
       const scenarioId = String(document.getElementById('scenarioMode')?.value || '').trim().toLowerCase();
       if (scenarioId) {
@@ -129,4 +107,4 @@ window.EventSource = class RoomEventSource extends NativeEventSource {
   }
 };
 
-window.__AI_CHAT_DB__ = { openDb, dbGet, name: DB_NAME, extraPersonasKey: EXTRA_PERSONAS_KEY };
+window.__AI_CHAT_DB__ = { openDb, dbGet, name: DB_NAME };

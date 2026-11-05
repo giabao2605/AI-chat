@@ -22,11 +22,11 @@ function mountPrivateContextInspector() {
       <aside id="privateContextInspectorDrawer" class="private-context-inspector-drawer" aria-hidden="true">
         <div class="private-context-inspector-header">
           <div>
-            <div class="eyebrow">PRIVATE CONTEXT</div>
+
             <h2>Luồng context riêng</h2>
             <p>State riêng của phiên hiện tại/resume. Không phải long-term memory và không tự được recall ở phiên mới.</p>
           </div>
-          <button id="closePrivateContextInspectorBtn" class="icon-button" type="button" title="Đóng">×</button>
+          <button id="closePrivateContextInspectorBtn" class="icon-button" type="button" title="Đóng">Đóng</button>
         </div>
 
         <div class="private-context-inspector-toolbar">

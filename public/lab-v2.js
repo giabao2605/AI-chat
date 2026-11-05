@@ -1,7 +1,6 @@
 import { countHistoryAiTurns } from './history-resume.js';
 
 const $ = (id) => document.getElementById(id);
-const extraPersonaKey = window.__AI_CHAT_DB__?.extraPersonasKey || 'ai-chat-extra-personas-v1';
 const historyKey = 'ai-chat-history-v1';
 let config = null;
 let latestState = null;
@@ -15,16 +14,6 @@ function safeJson(raw, fallback = null) {
 
 function formatNumber(value) {
   return new Intl.NumberFormat('vi-VN').format(Number(value || 0));
-}
-
-function readExtraPersonas() {
-  const parsed = safeJson(localStorage.getItem(extraPersonaKey), {});
-  return parsed && typeof parsed === 'object' ? parsed : {};
-}
-
-function saveExtraPersonas() {
-  const next = { c: $('personaC')?.value || '', d: $('personaD')?.value || '' };
-  try { localStorage.setItem(extraPersonaKey, JSON.stringify(next)); } catch {}
 }
 
 async function dbPut(store, value, key) {
@@ -77,23 +66,11 @@ function createExtraAgentCard(id, agent) {
 function ensureExtraAgentUi() {
   const roomMini = document.querySelector('.room-mini');
   const stats = document.querySelector('.compact-stats');
-  const promptDetails = $('promptPanel');
-  const promptButtons = promptDetails?.querySelector('.two-cols');
-  const extra = readExtraPersonas();
 
   for (const id of ['c', 'd']) {
     const agent = config?.agents?.[id];
     if (!agent?.configured) continue;
     if (!$(`agent${id.toUpperCase()}Total`) && stats) stats.insertBefore(createExtraAgentCard(id, agent), roomMini);
-    if (!$(`persona${id.toUpperCase()}`) && promptDetails && promptButtons) {
-      const label = document.createElement('label');
-      label.className = 'field';
-      label.innerHTML = `<span><i class="agent-dot ${id}"></i> Persona Agent ${id.toUpperCase()}</span><textarea id="persona${id.toUpperCase()}" rows="4" placeholder="Tính cách riêng cho ${agent.name}."></textarea>`;
-      promptDetails.insertBefore(label, promptButtons);
-      const field = label.querySelector('textarea');
-      field.value = extra[id] || '';
-      field.addEventListener('input', saveExtraPersonas);
-    }
     const startSpeaker = $('startSpeaker');
     if (startSpeaker && ![...startSpeaker.options].some((option) => option.value === id)) {
       const option = document.createElement('option');
@@ -116,76 +93,12 @@ function updateAllStats(stats = {}) {
   if ($('combinedTotal')) $('combinedTotal').textContent = formatNumber(total);
 }
 
-const PRESETS = {
-  default: { label: 'Mặc định', mode: 'turns', shared: null, personas: {} },
-  debate: {
-    label: 'Tranh biện', mode: 'turns',
-    shared: 'Hãy tranh luận có cấu trúc. Nêu luận điểm rõ, phản biện trực tiếp, yêu cầu bằng chứng khi cần và sẵn sàng đổi ý nếu đối phương chứng minh tốt hơn. Không đồng ý xã giao.',
-    personas: { a: 'Bảo vệ luận điểm chính nhưng không cố chấp. Ưu tiên bằng chứng và tính nhất quán.', b: 'Đóng vai phản biện mạnh, tìm lỗ hổng, phản ví dụ và giả định ẩn.', c: 'Đóng vai trọng tài phân tích, chỉ ra bên nào có bằng chứng mạnh hơn và vì sao.', d: 'Đưa góc nhìn thứ ba hoặc giải pháp dung hòa khi hai bên mắc kẹt.' },
-  },
-  brainstorm: {
-    label: 'Brainstorm', mode: 'parallel',
-    shared: 'Ưu tiên tạo ý tưởng mới, cụ thể và khác nhau. Không vội bác bỏ; mở rộng ý hay của người khác, sau đó mới lọc theo tính khả thi. Tránh lặp ý.',
-    personas: { a: 'Sinh ý tưởng thực dụng.', b: 'Sinh ý tưởng táo bạo.', c: 'Tìm biến thể và kết hợp ý tưởng.', d: 'Đánh giá rủi ro và cách triển khai.' },
-  },
-  codeReview: {
-    label: 'Review code', mode: 'turns',
-    shared: 'Review kỹ thuật như một nhóm senior engineer. Ưu tiên correctness, security, concurrency, maintainability, testability và hiệu năng. Chỉ ra lỗi cụ thể trước, đề xuất sửa sau. Không khen lấy lệ.',
-    personas: { a: 'Tập trung kiến trúc và correctness.', b: 'Tập trung bug, edge case và test.', c: 'Tập trung security và dữ liệu.', d: 'Tập trung hiệu năng, DX và độ đơn giản.' },
-  },
-  factCheck: {
-    label: 'Fact-check', mode: 'turns',
-    shared: 'Mọi tuyên bố thực tế quan trọng phải được kiểm chứng. Ưu tiên nguồn gốc, nguồn chính thức và nhiều nguồn độc lập. Phân biệt rõ dữ kiện, suy luận và phần chưa chắc chắn. Dùng web khi thông tin có thể thay đổi.',
-    personas: { a: 'Tìm và trình bày bằng chứng ủng hộ.', b: 'Tìm bằng chứng phản bác hoặc ngoại lệ.', c: 'Đánh giá chất lượng nguồn.', d: 'Tổng hợp verdict cuối cùng với mức độ tin cậy.' },
-  },
-  socratic: {
-    label: 'Socratic', mode: 'turns',
-    shared: 'Khám phá vấn đề bằng câu hỏi chính xác, mỗi lượt chỉ đào sâu một nút thắt. Không biến hội thoại thành bài giảng dài. Chỉ kết luận khi các giả định quan trọng đã được kiểm tra.',
-    personas: { a: 'Hỏi về định nghĩa và giả định.', b: 'Hỏi về bằng chứng và phản ví dụ.', c: 'Hỏi về hệ quả.', d: 'Tóm tắt điều đã biết và câu hỏi còn mở.' },
-  },
-};
-
-function ensurePresetUi() {
-  if ($('conversationPreset')) return;
-  const sessionSection = document.querySelector('[aria-labelledby="sessionSectionLabel"]');
-  if (!sessionSection) return;
-  const field = document.createElement('label');
-  field.className = 'field lab-preset-field';
-  field.innerHTML = '<span>Preset phòng</span><select id="conversationPreset"></select><small>Preset thay cả cách điều phối và persona, không chỉ đổi một câu prompt cho có.</small>';
-  sessionSection.insertBefore(field, sessionSection.children[1] || null);
-  const select = field.querySelector('select');
-  for (const [key, preset] of Object.entries(PRESETS)) {
-    const option = document.createElement('option');
-    option.value = key;
-    option.textContent = preset.label;
-    select.append(option);
-  }
-  select.addEventListener('change', () => applyPreset(select.value));
-}
-
-function setField(id, value) {
-  const field = $(id);
-  if (!field || value == null) return;
-  field.value = value;
-  field.dispatchEvent(new Event('input', { bubbles: true }));
-  field.dispatchEvent(new Event('change', { bubbles: true }));
-}
-
-function applyPreset(key) {
-  const preset = PRESETS[key] || PRESETS.default;
-  setField('conversationMode', preset.mode);
-  if (key === 'default') setField('sharedPrompt', config?.defaults?.sharedPrompt || '');
-  else setField('sharedPrompt', `${config?.defaults?.sharedPrompt || ''}\n\nQUY TẮC PRESET:\n${preset.shared}`);
-  for (const id of config?.agentSlots || ['a', 'b', 'c', 'd']) setField(`persona${id.toUpperCase()}`, preset.personas[id] || '');
-  saveExtraPersonas();
-}
-
 function createInspector() {
   if (inspectorDrawer) return;
   inspectorDrawer = document.createElement('aside');
   inspectorDrawer.className = 'lab-inspector';
   inspectorDrawer.setAttribute('aria-hidden', 'true');
-  inspectorDrawer.innerHTML = '<div class="lab-inspector-head"><div><div class="eyebrow">DEBUG TIMELINE</div><h2>Inspector</h2></div><button class="icon-button" id="closeLabInspector">×</button></div><div class="lab-inspector-body"></div>';
+  inspectorDrawer.innerHTML = '<div class="lab-inspector-head"><div><h2>Inspector</h2></div><button class="icon-button" id="closeLabInspector">Đóng</button></div><div class="lab-inspector-body"></div>';
   document.body.append(inspectorDrawer);
   inspectorBody = inspectorDrawer.querySelector('.lab-inspector-body');
   $('closeLabInspector').addEventListener('click', () => toggleInspector(false));
@@ -251,9 +164,6 @@ function startPayloadForBranch(maxTurns) {
     conversationMode: $('conversationMode')?.value || 'turns',
     temperature: Number($('temperature')?.value || 0.8),
     maxOutputTokens: Number($('maxOutputTokens')?.value || 1200),
-    sharedPrompt: $('sharedPrompt')?.value || config?.defaults?.sharedPrompt || '',
-    personaA: $('personaA')?.value || '',
-    personaB: $('personaB')?.value || '',
   };
 }
 
@@ -330,7 +240,7 @@ function connectLabEvents() {
 
 async function init() {
   config = await fetch('/api/config', { cache: 'no-store' }).then((response) => response.json());
-  ensureExtraAgentUi(); ensurePresetUi(); createInspector(); addRoomBadge(); connectLabEvents(); decorateMessages(document);
+  ensureExtraAgentUi(); createInspector(); addRoomBadge(); connectLabEvents(); decorateMessages(document);
   const observer = new MutationObserver((records) => {
     for (const record of records) for (const node of record.addedNodes) if (node.nodeType === 1) decorateMessages(node.matches?.('.message') ? node.parentElement : node);
   });

@@ -247,54 +247,6 @@
   border-top: 1px solid var(--stroke-soft);
 }
 
-.prompt-fold > .field {
-  margin-left: 11px;
-  margin-right: 11px;
-}
-
-.prompt-fold > summary + .field {
-  margin-top: 11px;
-}
-
-.prompt-fold > .two-cols {
-  margin: 0 11px 9px;
-}
-
-.prompt-fold > .footnote {
-  margin: 0 11px 11px;
-  line-height: 1.45;
-}
-
-#agentProfilesShell {
-  margin: 10px 11px 11px;
-}
-
-#agentProfilesShell > div:first-child {
-  margin-bottom: 4px;
-}
-
-.agent-profile-shell {
-  gap: 7px !important;
-}
-
-.agent-profile-card {
-  border-radius: 9px !important;
-}
-
-.agent-profile-card > summary {
-  padding: 9px 10px !important;
-  font-size: 11px;
-}
-
-.agent-profile-body {
-  padding: 0 9px 9px !important;
-  gap: 8px !important;
-}
-
-.agent-profile-grid {
-  gap: 7px !important;
-}
-
 .legacy-generation-settings {
   display: none !important;
 }
@@ -342,8 +294,7 @@
 }
 
 @media (max-width: 560px) {
-  .sidebar-grid-2,
-  .agent-profile-grid {
+  .sidebar-grid-2 {
     grid-template-columns: 1fr !important;
   }
 }

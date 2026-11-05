@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-05T13:38:06.7698524+07:00",
+  "title": "Design System: AI Conversation Lab",
+  "extensions": {
+    "colorMeta": {
+      "text": {
+        "role": "primary",
+        "displayName": "Soft white"
+      },
+      "bg": {
+        "role": "neutral",
+        "displayName": "Charcoal canvas"
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Dark sidebar"
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Readable gray"
+      }
+    },
+    "typographyMeta": {
+      "conversation": {
+        "displayName": "Conversation",
+        "purpose": "Long-form transcript; 15px at widths up to 620px."
+      },
+      "headline": {
+        "displayName": "Empty-state heading",
+        "purpose": "The existing centered start screen."
+      }
+    },
+    "shadows": [
+      {
+        "name": "shadow",
+        "value": "0 16px 48px #00000040",
+        "purpose": "History and inspector drawers; ordinary surfaces stay flat."
+      }
+    ],
+    "motion": [
+      {
+        "name": "button-state",
+        "value": "background .15s ease, color .15s ease, border-color .15s ease",
+        "purpose": "Button hover changes without translation."
+      },
+      {
+        "name": "reduced-motion-duration",
+        "value": ".01ms",
+        "purpose": "Transition and animation duration under prefers-reduced-motion: reduce."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact-desktop",
+        "value": "1100px"
+      },
+      {
+        "name": "stacked-workspace",
+        "value": "900px"
+      },
+      {
+        "name": "narrow",
+        "value": "620px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary empty-state action",
+      "kind": "button",
+      "refersTo": "empty-action-primary",
+      "description": "Existing text action for starting with an AI-selected topic.",
+      "html": "<button class=\"preview-primary\" type=\"button\">Để AI tự chọn chủ đề</button>",
+      "css": ".preview-primary { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; font-size: 13px; font-weight: 500; min-height: 44px; padding: 0 18px; border: 1px solid transparent; border-radius: 8px; background: var(--text, #ececec); color: #171717; box-shadow: none; transition: background .15s ease, color .15s ease, border-color .15s ease; } .preview-primary:hover:not(:disabled) { background: #ffffff; } .preview-primary:focus-visible { outline: 2px solid var(--text, #ececec); outline-offset: 3px; } .preview-primary:disabled { opacity: .42; cursor: not-allowed; } @media (prefers-reduced-motion: reduce) { .preview-primary { transition-duration: .01ms; } }"
+    },
+    {
+      "name": "Settings field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Neutral input with visible hover and keyboard focus.",
+      "html": "<input class=\"preview-field\" aria-label=\"Chủ đề\" placeholder=\"Nhập chủ đề\" />",
+      "css": ".preview-field { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; font-size: 13px; min-height: 42px; padding: 10px 12px; border: 1px solid var(--line, #383838); border-radius: 8px; background: #242424; color: var(--text, #ececec); box-shadow: none; } .preview-field::placeholder { color: var(--muted, #ababab); opacity: 1; } .preview-field:hover { background: #292929; border-color: var(--stroke-strong, #575757); } .preview-field:focus, .preview-field:focus-visible { border-color: #a0a0a0; outline: 1px solid #a0a0a0; box-shadow: none; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "User-approved ChatGPT reference",
+    "overview": "Neutral charcoal, a darker sidebar, restrained controls and a readable transcript for personal desktop entertainment. Typography and spacing carry the hierarchy; decoration stays quiet.",
+    "keyCharacteristics": [
+      "System sans-serif",
+      "Flat tonal surfaces",
+      "White primary actions",
+      "Text labels"
+    ],
+    "rules": [],
+    "dos": [
+      "Do reuse existing neutral tokens and vanilla components.",
+      "Do retain visible keyboard focus and readable metadata.",
+      "Do preserve existing capabilities."
+    ],
+    "donts": [
+      "Don't add gradients, neon decoration or icons.",
+      "Don't add dependencies or features for styling."
+    ]
+  }
+}

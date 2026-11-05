@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
 
 const index = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
 const controlUi = await readFile(new URL('../public/control-ui.js', import.meta.url), 'utf8');
-const promptUi = await readFile(new URL('../public/prompt-ui.js', import.meta.url), 'utf8');
+const session = await readFile(new URL('../public/room-session.js', import.meta.url), 'utf8');
+const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
 
 test('control persistence loads after the main app and restores saved tuning', () => {
   const appIndex = index.indexOf('src="/app.js"');
@@ -19,25 +21,31 @@ test('control persistence loads after the main app and restores saved tuning', (
   assert.match(controlUi, /field\.addEventListener\('change', persist\)/);
 });
 
-test('prompt editor auto-saves and keeps its saved localStorage value', () => {
-  assert.match(promptUi, /let saved = parseStoredPromptSettings\(localStorage\.getItem\(PROMPT_SETTINGS_STORAGE_KEY\)\)/);
-  assert.match(promptUi, /setTimeout\(\(\) => save\(\{ announce: false \}\), 350\)/);
-  assert.match(promptUi, /localStorage\.setItem\(PROMPT_SETTINGS_STORAGE_KEY/);
-  assert.match(promptUi, /Prompt này sẽ được giữ nguyên sau khi reload hoặc cập nhật code/);
+test('removed AI and Prompt editor cannot load or inject saved overrides', () => {
+  assert.doesNotMatch(index, /promptPanel|sharedPrompt|personaA|personaB|prompt-ui/);
+  assert.doesNotMatch(session, /readAgentProfiles|agent-profiles|readExtraPersonas|body\.personas|body\.agentProfiles/);
+  assert.doesNotMatch(app, /els\.(sharedPrompt|personaA|personaB)/);
 });
 
-test('saved prompt wins after async app startup and late default writes', () => {
-  assert.match(promptUi, /if \(saved\) apply\(saved\)/);
-  assert.match(promptUi, /await waitForMainApp\(\);/);
-  assert.match(promptUi, /await nextPaint\(\);\s*await nextPaint\(\);/);
-  assert.match(promptUi, /const stored = parseStoredPromptSettings\(localStorage\.getItem\(PROMPT_SETTINGS_STORAGE_KEY\)\);[\s\S]*apply\(saved\);/);
-  assert.match(promptUi, /new MutationObserver/);
-  assert.doesNotMatch(promptUi, /for \(let i = 0; i < 100; i \+= 1\)/);
-});
-
-test('pagehide never persists a programmatic default over the saved prompt', () => {
-  assert.match(promptUi, /let userEdited = false;/);
-  assert.match(promptUi, /function scheduleAutoSave\(\) \{\s*userEdited = true;/);
-  assert.match(promptUi, /window\.addEventListener\('pagehide',[\s\S]*if \(userEdited\) save\(\{ announce: false \}\);/);
-  assert.doesNotMatch(promptUi, /window\.addEventListener\('pagehide', \(\) => save\(/);
+test('start and continue ignore retired settings still present in localStorage', async () => {
+  const requests = [];
+  const browser = {
+    fetch: async (url, init) => { requests.push({ url, body: JSON.parse(init.body) }); },
+    EventSource: class {},
+  };
+  runInNewContext(session.replace(/^import .*;\r?\n/gm, ''), {
+    window: browser, URL, Request,
+    location: { href: 'http://localhost:3000/', origin: 'http://localhost:3000' },
+    sessionStorage: { getItem: () => 'room_test123', setItem() {} },
+    localStorage: { getItem: () => JSON.stringify({ a: { prompt: 'old custom prompt', temperature: 1.9 }, c: 'old persona' }) },
+    document: { getElementById: () => null },
+  });
+  for (const endpoint of ['start', 'continue']) {
+    await browser.fetch(`/api/${endpoint}`, { method: 'POST', body: JSON.stringify({ topic: 'test', maxTurns: 2 }) });
+  }
+  assert.equal(requests.length, 2);
+  for (const request of requests) {
+    assert.deepEqual(request.body, { topic: 'test', maxTurns: 2 });
+    assert.match(request.url, /room=room_test123/);
+  }
 });
