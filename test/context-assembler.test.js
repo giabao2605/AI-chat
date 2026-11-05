@@ -34,12 +34,18 @@ test('active turn base assembly preserves identity, summary, steering and speake
   assert.match(messages[0].content, /generate_image/);
   assert.match(messages[0].content, /song song/);
   assert.match(messages[0].content, /persona rules/);
+  assert.match(messages[0].content, /"action":"pass"/);
   assert.match(messages[2].content, /conversation_summary/);
   assert.match(messages[3].content, /conversation_steering/);
   assert.equal(messages.at(-2).role, 'assistant');
   assert.equal(messages.at(-2).content, 'my old reply');
   assert.equal(messages.at(-1).role, 'user');
   assert.equal(messages.at(-1).content, 'Beta: their reply');
+});
+
+test('scenario dialogue omits the pass contract', () => {
+  const messages = new ContextAssembler().buildAgentMessages({ allowPass: false });
+  assert.doesNotMatch(messages[0].content, /"action":"pass"/);
 });
 
 test('memory context is inserted after system messages without mutating the input', () => {

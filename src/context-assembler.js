@@ -1,3 +1,4 @@
+import { CONTRIBUTION_PROMPT } from './conversation-progress.js';
 import { applyContextBudget } from './context-budget.js';
 
 function cloneMessages(messages) {
@@ -53,6 +54,7 @@ export class ContextAssembler {
     loopGuard = false,
     imageToolAvailable = false,
     conversationMode = 'turns',
+    allowPass = true,
   } = {}) {
     const participantNames = participants.map((agent) => `${agent.name} (${agent.id.toUpperCase()})`).join(', ');
     const toolNote = imageToolAvailable
@@ -61,7 +63,7 @@ export class ContextAssembler {
     const parallelNote = conversationMode === 'parallel'
       ? '\n\nPhòng đang ở chế độ song song. Các AI khác có thể đang trả lời cùng lúc, nên transcript là snapshot tại lúc lượt này bắt đầu.'
       : '';
-    const system = `${sharedPrompt}\n\nTên hiển thị của bạn: ${agentName}. Những AI đang tham gia: ${participantNames}.${toolNote}${parallelNote}${personaPrompt ? `\n\nVai trò/phong cách bổ sung của bạn:\n${personaPrompt}` : ''}`;
+    const system = `${sharedPrompt}${allowPass ? `\n\n${CONTRIBUTION_PROMPT}` : ''}\n\nTên hiển thị của bạn: ${agentName}. Những AI đang tham gia: ${participantNames}.${toolNote}${parallelNote}${personaPrompt ? `\n\nVai trò/phong cách bổ sung của bạn:\n${personaPrompt}` : ''}`;
     const messages = [
       { role: 'system', content: system },
       { role: 'user', content: `Chủ đề của phòng trò chuyện: ${topic}\n\nTiếp tục cuộc trò chuyện dựa trên dữ liệu hội thoại bên dưới.` },
@@ -75,7 +77,7 @@ export class ContextAssembler {
     if (loopGuard) {
       messages.push({
         role: 'user',
-        content: '<conversation_steering>Cuộc trò chuyện đang có dấu hiệu lặp. Không nhắc lại luận điểm cũ. Hãy đưa ra góc nhìn, phản ví dụ, ứng dụng hoặc câu hỏi mới có giá trị.</conversation_steering>',
+        content: '<conversation_steering>Cuộc trò chuyện đang có dấu hiệu lặp. Không nhắc lại luận điểm cũ. Chỉ bổ sung điều thực sự mới; nếu đã hết ý thì bỏ lượt, không kéo dài bằng câu hỏi hoặc bất đồng giả tạo.</conversation_steering>',
       });
     }
     for (const item of recentHistory) {

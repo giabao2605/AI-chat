@@ -1,3 +1,4 @@
+import { isPassReply, passStream } from './conversation-progress.js';
 import { IMAGE_GENERATION_TOOL, parseImageToolCall } from './agent-tools.js';
 
 function mergeUsage(total, usage) {
@@ -40,6 +41,7 @@ export class AgentExecutor {
     appendImageToolEntry = null,
     onVisionFallback = null,
     onToolFallback = null,
+    allowPass = false,
   } = {}) {
     if (!provider?.streamChat) throw new Error(`Provider của ${agentName || agentId || 'agent'} không khả dụng.`);
     const workingMessages = Array.isArray(messages) ? messages : [];
@@ -61,6 +63,7 @@ export class AgentExecutor {
       emit('message:delta', { id: messageId, speaker: agentId, delta });
     };
 
+    const stream = passStream(onDelta, allowPass);
     while (isActive()) {
       const canUseImageTool = Boolean(imageTool?.generate)
         && imageCallsUsed < Math.max(0, Number(maxImageCalls) || 0);
@@ -72,7 +75,7 @@ export class AgentExecutor {
           temperature,
           maxOutputTokens,
           signal,
-          onDelta,
+          onDelta: delta => stream.write(delta),
           tools: canUseImageTool ? [IMAGE_GENERATION_TOOL] : [],
           toolChoice: 'auto',
         });
@@ -127,7 +130,9 @@ export class AgentExecutor {
     if (!isActive()) return null;
     const text = safeText(textParts.join('\n\n'));
     if (!text) throw new Error(`${agentName || agentId} trả về nội dung rỗng.`);
-    if (!messageStarted) {
+    const passed = allowPass && isPassReply(text);
+    stream.finish(passed);
+    if (!messageStarted && !passed) {
       messageStarted = true;
       firstTokenAt = Date.now();
       emit('message:start', { id: messageId, speaker: agentId, name: agentName });

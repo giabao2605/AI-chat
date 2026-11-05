@@ -14,7 +14,9 @@ export function getHistoryResumePlan(session, { requestedMaxTurns, liveStatus = 
     return { canResume: false, reason: 'not-resumable', usedTurns: 0, maxTurns: 0, remainingTurns: 0 };
   }
 
-  const usedTurns = countHistoryAiTurns(session.history);
+  const savedTurns = Number(session.turn);
+  const usedTurns = Math.max(countHistoryAiTurns(session.history),
+    Number.isFinite(savedTurns) ? Math.min(100000, Math.max(0, Math.floor(savedTurns))) : 0);
   const savedMax = Math.max(1, Math.floor(Number(session.maxTurns) || 20));
 
   if (ACTIVE_STATUSES.has(liveStatus)) {

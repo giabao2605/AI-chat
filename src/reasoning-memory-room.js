@@ -113,7 +113,7 @@ export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
     const recentStart = Math.max(this.summaryCoveredIndex, historySnapshot.length - this.contextConfig.recentMessages);
     const recentRaw = historySnapshot.slice(recentStart);
     const recentHistory = await this.historyForModel(recentRaw);
-    const loopGuard = detectConversationLoop(historySnapshot, this.contextConfig.loopThreshold, this.agentIds);
+    const loopGuard = !this.scenarioController && detectConversationLoop(historySnapshot, this.contextConfig.loopThreshold, this.agentIds);
     const messages = this.contextAssembler.buildAgentMessages({
       agentId,
       agentName: agent.name,
@@ -126,6 +126,7 @@ export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
       loopGuard,
       imageToolAvailable: this.imageToolAvailable(),
       conversationMode: this.settings.conversationMode,
+      allowPass: !this.scenarioController,
     });
 
     let research = { sources: [], debug: { searched: false, ms: 0 } };
@@ -141,6 +142,7 @@ export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
       agentId,
       agentName: agent.name,
       messageId,
+      allowPass: !this.scenarioController,
       provider: this.providers[agentId],
       messages,
       temperature: this.settings.temperature,
@@ -190,11 +192,7 @@ export class ReasoningMemoryProfiledRoom extends MemoryProfiledRoom {
       sources: research.sources,
       debug,
     };
-    this.history.push(entry);
-    this.addUsage(agentId, entry.usage, true);
-    this.recordDebug('turn:done', { agentId, messageId, ...debug });
-    this.emit('message:done', entry);
-    return { entry };
+    return this.finishAgentTurn(entry, historySnapshot);
   }
 
   reasoningStatusForConfig(config, mode) {

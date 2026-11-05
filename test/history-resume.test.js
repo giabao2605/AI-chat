@@ -50,6 +50,25 @@ test('resume plan preserves the original cap while there are turns left', () => 
   assert.equal(plan.extended, false);
 });
 
+test('continuation preserves pass turns absent from the transcript', async t => {
+  const session = oldSession({ turn: 4, maxTurns: 5 });
+  session.stats.a.turns = 2;
+  session.stats.b.turns = 2;
+  const plan = getHistoryResumePlan(session);
+  assert.equal(plan.usedTurns, 4);
+  assert.equal(plan.remainingTurns, 1);
+  const room = new ScenarioRoom({ agents, providerFactory, contextConfig: { summarizeAfter: 100 } });
+  t.after(() => room.stop());
+  const completed = new Promise(resolve => room.on('state', state => {
+    if (state.status === 'completed') resolve(state);
+  }));
+  await room.continueFromHistory({ session, maxTurns: plan.maxTurns });
+  const snapshot = await completed;
+  assert.equal(snapshot.turn, 5);
+  assert.equal(snapshot.history.length, 3);
+  assert.equal(snapshot.stats.a.turns + snapshot.stats.b.turns, 5);
+});
+
 test('resume plan requires an explicit higher cap after the old cap is exhausted', () => {
   const session = oldSession({ maxTurns: 2 });
   const blocked = getHistoryResumePlan(session, { requestedMaxTurns: 2, liveStatus: 'idle' });

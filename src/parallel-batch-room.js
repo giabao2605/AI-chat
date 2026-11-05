@@ -218,6 +218,8 @@ export class ParallelBatchRoom extends MultiAgentRoom {
   scheduleParallelAgents(activeRunId = this.runId, { initial = false } = {}) {
     if (activeRunId !== this.runId || !this.isParallelMode() || this.status !== 'running') return;
     this.ensureParallelRuntime();
+    this.pauseIfQuiescent();
+    if (this.status !== 'running') return;
 
     for (const agentId of this.nextSchedulingOrder()) {
       if (this.availableParallelSlots() <= 0) break;
@@ -232,6 +234,7 @@ export class ParallelBatchRoom extends MultiAgentRoom {
 
     this.emitState();
     this.completeAtLimit();
+    this.pauseIfQuiescent();
   }
 
   queueParallelSchedule(activeRunId = this.runId, delayMs = PARALLEL_REPLY_COOLDOWN_MS) {
@@ -256,8 +259,8 @@ export class ParallelBatchRoom extends MultiAgentRoom {
         cancelled = true;
       } else {
         attempted = true;
-        success = Boolean(outcome?.entry);
-        if (success) this.setParallelAgentState(agentId, 'done', { messageId: outcome.entry.id, error: '' });
+        success = Boolean(outcome?.entry || outcome?.passed);
+        if (success) this.setParallelAgentState(agentId, 'done', { messageId: outcome.entry?.id || null, error: '' });
       }
     } catch (error) {
       cancelled = error?.name === 'AbortError'

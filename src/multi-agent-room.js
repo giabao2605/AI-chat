@@ -1,3 +1,5 @@
+import { CONTRIBUTION_PROMPT, detectConversationLoop, isRepeatedReply, isPassReply, passStream } from './conversation-progress.js';
+export { detectConversationLoop, loopSimilarity } from './conversation-progress.js';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { IMAGE_GENERATION_TOOL, parseImageToolCall } from './agent-tools.js';
@@ -52,39 +54,6 @@ function sourceMetadata(source) {
     query: source.query || '',
     deep: Boolean(source.deepContent),
   };
-}
-
-function normalizedTokens(text) {
-  return new Set(String(text || '')
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .split(/\s+/)
-    .filter((token) => token.length > 2)
-    .slice(0, 500));
-}
-
-export function loopSimilarity(a, b) {
-  const left = normalizedTokens(a);
-  const right = normalizedTokens(b);
-  if (!left.size || !right.size) return 0;
-  let intersection = 0;
-  for (const token of left) if (right.has(token)) intersection += 1;
-  const union = left.size + right.size - intersection;
-  return union ? intersection / union : 0;
-}
-
-export function detectConversationLoop(history = [], threshold = 0.74, agentIds = null) {
-  const configuredAgents = Array.isArray(agentIds) && agentIds.length ? new Set(agentIds) : null;
-  const ai = history.filter((item) => {
-    const speaker = String(item?.speaker || '');
-    return configuredAgents ? configuredAgents.has(speaker) : /^[a-z]$/.test(speaker);
-  }).slice(-4);
-  if (ai.length < 3) return false;
-  const scores = [];
-  for (let i = 1; i < ai.length; i += 1) scores.push(loopSimilarity(ai[i - 1].text, ai[i].text));
-  const high = scores.filter((score) => score >= threshold).length;
-  return high >= Math.min(2, scores.length);
 }
 
 function blankStats(agentIds) {
@@ -170,6 +139,7 @@ function buildAgentMessages({
   loopGuard,
   imageToolAvailable,
   conversationMode,
+  allowPass = true,
 }) {
   const participantNames = participants.map((agent) => `${agent.name} (${agent.id.toUpperCase()})`).join(', ');
   const toolNote = imageToolAvailable
@@ -178,7 +148,7 @@ function buildAgentMessages({
   const parallelNote = conversationMode === 'parallel'
     ? '\n\nPhòng đang ở chế độ song song. Các AI khác có thể đang trả lời cùng lúc, nên transcript là snapshot tại lúc lượt này bắt đầu.'
     : '';
-  const system = `${sharedPrompt || DEFAULT_SHARED_PROMPT}\n\nTên hiển thị của bạn: ${agentName}. Những AI đang tham gia: ${participantNames}.${toolNote}${parallelNote}${personaPrompt ? `\n\nVai trò/phong cách bổ sung của bạn:\n${personaPrompt}` : ''}`;
+  const system = `${sharedPrompt || DEFAULT_SHARED_PROMPT}${allowPass ? `\n\n${CONTRIBUTION_PROMPT}` : ''}\n\nTên hiển thị của bạn: ${agentName}. Những AI đang tham gia: ${participantNames}.${toolNote}${parallelNote}${personaPrompt ? `\n\nVai trò/phong cách bổ sung của bạn:\n${personaPrompt}` : ''}`;
   const messages = [
     { role: 'system', content: system },
     { role: 'user', content: `Chủ đề của phòng trò chuyện: ${topic}\n\nTiếp tục cuộc trò chuyện dựa trên dữ liệu hội thoại bên dưới.` },
@@ -192,7 +162,7 @@ function buildAgentMessages({
   if (loopGuard) {
     messages.push({
       role: 'user',
-      content: '<conversation_steering>Cuộc trò chuyện đang có dấu hiệu lặp. Không nhắc lại luận điểm cũ. Hãy đưa ra góc nhìn, phản ví dụ, ứng dụng hoặc câu hỏi mới có giá trị.</conversation_steering>',
+      content: '<conversation_steering>Cuộc trò chuyện đang có dấu hiệu lặp. Không nhắc lại luận điểm cũ. Chỉ bổ sung điều thực sự mới; nếu đã hết ý thì bỏ lượt, không kéo dài bằng câu hỏi hoặc bất đồng giả tạo.</conversation_steering>',
     });
   }
   for (const item of recentHistory) {
@@ -273,6 +243,8 @@ export class MultiAgentRoom extends EventEmitter {
   }
 
   resetExecutionState() {
+    this.noProgressTurns = 0;
+    this.autoPausedForProgress = false;
     if (this.abortController && !this.abortController.signal.aborted) this.abortController.abort();
     this.abortAllAgents();
     this.clearParallelWakeTimer();
@@ -442,7 +414,8 @@ export class MultiAgentRoom extends EventEmitter {
         if (TERMINAL_STATUSES.has(this.status)) break;
         const outcome = await this.executeAgentTurn(speaker, activeRunId);
         if (TERMINAL_STATUSES.has(this.status)) break;
-        if (outcome?.entry) this.turn += 1;
+        if (outcome?.entry || outcome?.passed) this.turn += 1;
+        if (this.turn < this.maxTurns && this.noProgressTurns >= Math.max(2, this.agentIds.length)) this.pauseForNoProgress();
         speaker = this.nextSpeaker(speaker);
         this.emitState();
       }
@@ -492,6 +465,7 @@ export class MultiAgentRoom extends EventEmitter {
 
   parallelRelevantMessage(item, agentId) {
     if (!item) return false;
+    if (!this.scenarioController && item.debug?.progress === 'repeat') return false;
     if (item.speaker === 'user') return true;
     if (this.agentIds.includes(item.speaker)) return item.speaker !== agentId;
     if (item.speaker === 'tool') return item.requestedBy ? item.requestedBy !== agentId : true;
@@ -518,6 +492,8 @@ export class MultiAgentRoom extends EventEmitter {
 
   scheduleParallelAgents(activeRunId = this.runId, { initial = false } = {}) {
     if (activeRunId !== this.runId || !this.isParallelMode() || this.status !== 'running') return;
+    this.pauseIfQuiescent();
+    if (this.status !== 'running') return;
     const first = this.firstSpeaker();
     const startIndex = Math.max(0, this.agentIds.indexOf(first));
     const order = [...this.agentIds.slice(startIndex), ...this.agentIds.slice(0, startIndex)];
@@ -526,6 +502,7 @@ export class MultiAgentRoom extends EventEmitter {
       void this.launchParallelAgent(agentId, activeRunId);
     }
     this.completeAtLimit();
+    this.pauseIfQuiescent();
   }
 
   queueParallelSchedule(activeRunId = this.runId, delayMs = PARALLEL_REPLY_COOLDOWN_MS) {
@@ -541,7 +518,7 @@ export class MultiAgentRoom extends EventEmitter {
     try {
       const outcome = await this.executeAgentTurn(agentId, activeRunId);
       if (!outcome || activeRunId !== this.runId || TERMINAL_STATUSES.has(this.status)) return;
-      if (outcome.entry) this.turn += 1;
+      if (outcome.entry || outcome.passed) this.turn += 1;
       if (this.status === 'pausing' && this.runningAgentCount() === 0) {
         this.status = 'paused';
         this.emitState();
@@ -717,7 +694,7 @@ export class MultiAgentRoom extends EventEmitter {
     const recentStart = Math.max(this.summaryCoveredIndex, historySnapshot.length - this.contextConfig.recentMessages);
     const recentRaw = historySnapshot.slice(recentStart);
     const recentHistory = await this.historyForModel(recentRaw);
-    const loopGuard = detectConversationLoop(historySnapshot, this.contextConfig.loopThreshold, this.agentIds);
+    const loopGuard = !this.scenarioController && detectConversationLoop(historySnapshot, this.contextConfig.loopThreshold, this.agentIds);
     const messages = buildAgentMessages({
       agentId,
       agentName: agent.name,
@@ -730,6 +707,7 @@ export class MultiAgentRoom extends EventEmitter {
       loopGuard,
       imageToolAvailable: this.imageToolAvailable(),
       conversationMode: this.settings.conversationMode,
+      allowPass: !this.scenarioController,
     });
 
     let research = { sources: [], debug: { searched: false, ms: 0 } };
@@ -758,6 +736,7 @@ export class MultiAgentRoom extends EventEmitter {
       this.emit('message:delta', { id: messageId, speaker: agentId, delta });
     };
 
+    const stream = passStream(onDelta, !this.scenarioController);
     let finalResult = null;
     while (activeRunId === this.runId && !TERMINAL_STATUSES.has(this.status)) {
       const canStillUseImageTool = this.imageToolAvailable() && imageCallsUsed < this.maxImageToolCallsPerTurn;
@@ -769,7 +748,7 @@ export class MultiAgentRoom extends EventEmitter {
           temperature: this.settings.temperature,
           maxOutputTokens: this.settings.maxOutputTokens,
           signal: controller.signal,
-          onDelta,
+          onDelta: delta => stream.write(delta),
           tools: canStillUseImageTool ? [IMAGE_GENERATION_TOOL] : [],
           toolChoice: 'auto',
         });
@@ -828,7 +807,9 @@ export class MultiAgentRoom extends EventEmitter {
     if (activeRunId !== this.runId || TERMINAL_STATUSES.has(this.status)) return null;
     const text = safeText(textParts.join('\n\n'), 100000);
     if (!text) throw new Error(`${agent.name} trả về nội dung rỗng.`);
-    if (!messageStarted) {
+    const passed = !this.scenarioController && isPassReply(text);
+    stream.finish(passed);
+    if (!messageStarted && !passed) {
       messageStarted = true;
       firstTokenAt = Date.now();
       this.emit('message:start', { id: messageId, speaker: agentId, name: agent.name });
@@ -860,11 +841,42 @@ export class MultiAgentRoom extends EventEmitter {
       sources: research.sources,
       debug,
     };
-    this.history.push(entry);
-    this.addUsage(agentId, entry.usage, true);
-    this.recordDebug('turn:done', { agentId, messageId, ...debug });
-    this.emit('message:done', entry);
-    return { entry };
+    return this.finishAgentTurn(entry, historySnapshot);
+  }
+
+  finishAgentTurn(entry, historySnapshot) {
+    const enabled = !this.scenarioController;
+    const passed = enabled && isPassReply(entry.text);
+    const repeated = enabled && !passed && isRepeatedReply(entry.text, this.history, this.agentIds);
+    const progress = passed ? 'pass' : repeated ? 'repeat' : 'new';
+    const result = { ...entry, debug: { ...entry.debug, progress } };
+    this.addUsage(entry.speaker, entry.usage, true);
+    this.recordDebug('turn:done', { agentId: entry.speaker, messageId: entry.id, ...result.debug });
+    if (!passed) {
+      this.history.push(result);
+      this.emit('message:done', result);
+    }
+    const latestUser = history => history.findLast(item => item.speaker === 'user')?.id;
+    if (enabled && latestUser(historySnapshot) === latestUser(this.history)) {
+      this.noProgressTurns = progress === 'new' ? 0 : this.noProgressTurns + 1;
+    }
+    return passed ? { passed: true } : { entry: result };
+  }
+
+  pauseForNoProgress() {
+    if (this.status !== 'running' || this.scenarioController) return;
+    if (this.agentIds.some(id => (this.privateInboxVersion?.[id] || 0)
+      > (this.agentRuntime[id]?.privateContextSeenVersion || 0))) return;
+    this.autoPausedForProgress = true;
+    this.pause();
+    this.emit('meta', { text: 'Các AI không còn ý mới. Đã tạm dừng; gửi tin nhắn hoặc bấm Tiếp tục để tiếp tục.' });
+    this.recordDebug('conversation:no-progress', { turns: this.noProgressTurns });
+  }
+
+  pauseIfQuiescent() {
+    if (this.noProgressTurns > 0 && this.runningAgentCount() === 0 && !this.parallelReservedTurns
+      && (this.noProgressTurns >= Math.max(2, this.agentIds.length)
+        || !this.agentIds.some(id => this.hasUnseenParallelTrigger(id)))) this.pauseForNoProgress();
   }
 
   addUsage(agentId, usage, countTurn) {
@@ -887,6 +899,8 @@ export class MultiAgentRoom extends EventEmitter {
       createdAt: new Date().toISOString(), usage: null, sources: [],
     };
     this.history.push(entry);
+    this.noProgressTurns = 0;
+    if (this.autoPausedForProgress && ['paused', 'pausing'].includes(this.status)) this.resume();
     this.emit('message:done', entry);
     this.emitState();
     if (this.isParallelMode() && this.status === 'running') this.queueParallelSchedule(this.runId, 0);
@@ -903,8 +917,14 @@ export class MultiAgentRoom extends EventEmitter {
   resume() {
     if (!['paused', 'pausing'].includes(this.status)) throw new Error('Phòng hiện không tạm dừng.');
     this.status = 'running';
+    this.noProgressTurns = 0;
+    this.autoPausedForProgress = false;
+    for (const runtime of Object.values(this.agentRuntime)) {
+      runtime.lastSeenIndex = -1;
+      runtime.parallelSeenIds = null;
+    }
     this.emitState();
-    if (this.isParallelMode()) this.queueParallelSchedule(this.runId, 0);
+    if (this.isParallelMode()) this.scheduleParallelAgents(this.runId, { initial: this.history.length === 0 });
   }
 
   stop() {
@@ -927,8 +947,9 @@ export class MultiAgentRoom extends EventEmitter {
     const history = sanitizeHistory(session.history, this.agentConfigs);
     if (!topic || !history.length) throw new Error('Phiên cũ không có đủ dữ liệu để tiếp tục.');
 
-    const usedTurns = history.filter((item) => this.agentIds.includes(item.speaker)).length;
-    let targetMaxTurns = Math.floor(clamp(input.maxTurns ?? session.maxTurns, usedTurns + 1, 100000, Math.max(usedTurns + 20, 20)));
+    const usedTurns = Math.max(history.filter((item) => this.agentIds.includes(item.speaker)).length,
+      Math.floor(clamp(session.turn, 0, 100000, 0)));
+    let targetMaxTurns = Math.floor(clamp(input.maxTurns ?? session.maxTurns, 1, 100000, Math.max(usedTurns + 20, 20)));
     if (this.hardTurnLimit > 0) targetMaxTurns = Math.min(targetMaxTurns, this.hardTurnLimit);
     if (usedTurns >= targetMaxTurns) throw new Error(`Phiên này đã dùng ${usedTurns}/${targetMaxTurns} lượt. Hãy tăng số lượt trước khi tiếp tục.`);
 
@@ -946,7 +967,7 @@ export class MultiAgentRoom extends EventEmitter {
         inputTokens: Math.max(0, Number(saved.inputTokens) || 0),
         outputTokens: Math.max(0, Number(saved.outputTokens) || 0),
         totalTokens: Math.max(0, Number(saved.totalTokens) || 0),
-        turns: history.filter((item) => item.speaker === id).length,
+        turns: Math.max(history.filter((item) => item.speaker === id).length, Math.floor(clamp(saved.turns, 0, usedTurns, 0))),
         estimatedTurns: Math.max(0, Number(saved.estimatedTurns) || 0),
       };
     }
