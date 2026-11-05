@@ -362,6 +362,7 @@ function applyState(next, { history = false } = {}) {
     els.topicPreview.textContent = next.topic || 'Chưa có chủ đề.';
     renderStats(next.stats, next.turn, next.maxTurns);
     if (history) renderTranscript(next.history);
+    if (active) removeEmpty();
   }
 }
 
@@ -479,13 +480,25 @@ function buildStartPayload(topicMode, topic) {
   };
 }
 
+async function requestStart(payload) {
+  const empty = els.chat.querySelector('.empty-state');
+  empty?.remove();
+  try {
+    return await api('/api/start', { method: 'POST', body: JSON.stringify(payload) });
+  } catch (error) {
+    if (empty && !viewingHistoryId && !['starting', 'running', 'paused', 'pausing'].includes(state?.status)
+      && !els.chat.querySelector('.message, .empty-state')) els.chat.prepend(empty);
+    throw error;
+  }
+}
+
 async function startConversation() {
   try {
     const topicMode = els.topicMode.value;
     const topic = els.topic.value.trim();
     if (topicMode === 'manual' && !topic) { toast('Hãy nhập chủ đề trước khi bắt đầu phiên.'); els.topic.focus(); return; }
     if (viewingHistoryId) returnToLive();
-    await api('/api/start', { method: 'POST', body: JSON.stringify(buildStartPayload(topicMode, topic)) });
+    await requestStart(buildStartPayload(topicMode, topic));
     if (topicMode === 'manual') els.topic.value = '';
   } catch (error) { toast(error.message); }
 }
@@ -509,7 +522,7 @@ els.userForm.addEventListener('submit', async (event) => {
     if (mode.action === 'message') {
       await api('/api/message', { method: 'POST', body: JSON.stringify({ text }) });
     } else if (mode.action === 'start') {
-      const next = await api('/api/start', { method: 'POST', body: JSON.stringify(buildStartPayload('manual', text)) });
+      const next = await requestStart(buildStartPayload('manual', text));
       applyState(next, { history: true });
     }
   } catch (error) {
